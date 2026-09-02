@@ -1,0 +1,144 @@
+spring:
+  application:
+    name: jijing-agent
+  profiles:
+    default: local
+  jackson:
+    default-property-inclusion: non_null
+  ai:
+    model:
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+fund:
+  security:
+    enabled: true
+    issuer: jijing-agent
+    audience: fund-web
+    access-token-ttl: 15m
+    refresh-token-ttl: 30d
+    # Keep true in deployed environments. Local HTTP development may override this in application-local.yml.
+    refresh-cookie-secure: true
+    bcrypt-strength: 12
+  provider:
+    type: mock
+    source-name: configured-http-api
+    connect-timeout: 2s
+    read-timeout: 5s
+  sync:
+    enabled: false
+    cron: "0 30 2 * * MON-FRI"
+    distributed-lock-enabled: false
+  analytics:
+    annual-risk-free-rate: 0
+    algorithm-version: fund-metrics-v1
+  metrics:
+    snapshot:
+      enabled: false
+      cron: "0 30 3 * * MON-FRI"
+  agent:
+    enabled: false
+    agentops:
+      enabled: ${AGENTOPS_PROMPT_ENABLED:false}
+      base-url: ${AGENTOPS_BASE_URL:http://localhost:18080}
+      admin-token: ${AGENTOPS_ADMIN_TOKEN:local-admin-token}
+      environment: ${AGENTOPS_ENVIRONMENT:local}
+    model:
+      provider: ${AI_CHAT_PROVIDER:none}
+      base-url: ${AI_CHAT_BASE_URL:}
+      api-key: ${AI_CHAT_API_KEY:}
+      model: ${AI_CHAT_MODEL:}
+    prompt-version: fund-agent-v1
+    tool-schema-version: fund-tools-v3
+    max-tool-calls-per-run: 6
+    max-repeated-identical-tool-call: 1
+    max-model-rounds: 5
+    run-timeout: 30s
+    tool-timeout: 5s
+    max-user-message-chars: 2000
+    max-conversation-messages: 20
+    max-conversation-tokens: 8000
+    fact-card-token-budget: 3000
+    fact-card-max-count: 12
+    fact-card-default-ttl: 24h
+  knowledge:
+    enabled: false
+    local-root: ./data/knowledge
+    parser-version: parser-v1
+    chunking-version: chunk-v1
+    target-tokens: 600
+    max-tokens: 850
+    overlap-tokens: 100
+    min-chunk-chars: 120
+    max-chunks-per-document: 5000
+    embedding-version: embedding-v1
+    embedding:
+      provider: ${AI_EMBEDDING_PROVIDER:none}
+      base-url: ${AI_EMBEDDING_BASE_URL:}
+      api-key: ${AI_EMBEDDING_API_KEY:}
+      model: ${AI_EMBEDDING_MODEL:}
+      dimensions: ${AI_EMBEDDING_DIMENSIONS:1536}
+    embedding-batch-size: 32
+    index-version: local-index-v1
+    index-type: local
+    elasticsearch-uri: http://127.0.0.1:9200
+    elasticsearch-username: ${ELASTICSEARCH_USERNAME:}
+    elasticsearch-password: ${ELASTICSEARCH_PASSWORD:}
+    elasticsearch-api-key: ${ELASTICSEARCH_API_KEY:}
+    elasticsearch-ca-certificate: ${ELASTICSEARCH_CA_CERTIFICATE:}
+    elasticsearch-connect-timeout: 2s
+    elasticsearch-read-timeout: 10s
+    index-name: fund_document_chunk_v1
+    embedding-dimensions: 1536
+    channel-top-k: 30
+    rrf-k: 60
+    fused-top-k: 20
+    rerank-top-k: 10
+    reranker-type: none
+    max-context-tokens: 5000
+    authorized-provider-enabled: false
+    authorized-provider-hosts: []
+    authorized-provider-max-bytes: 52428800
+    worker:
+      enabled: ${FUND_KNOWLEDGE_WORKER_ENABLED:false}
+      poll-delay-ms: 2000
+      heartbeat-delay-ms: 20000
+      concurrency: 2
+      lease-duration: 60s
+
+resilience4j:
+  retry:
+    instances:
+      fundProvider:
+        max-attempts: 3
+        wait-duration: 300ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      fundProvider:
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+  ratelimiter:
+    instances:
+      fundProvider:
+        limit-for-period: 5
+        limit-refresh-period: 1s
+        timeout-duration: 0

@@ -1,0 +1,5 @@
+# 此文件复制为 application-local-private.yml 后只保留在本机，不要提交。
+spring:
+  datasource:
+    password: your-local-mysql-password
+

@@ -1,0 +1,36 @@
+target/
+**/target/
+.idea/
+*.iml
+
+# Keep local credentials out of Git while retaining sanitized setup examples.
+.env
+.env.*
+!.env.example
+!**/.env.example
+application-local-private.yml
+**/application-local-private.yml
+
+# Generated frontend dependencies and build output are reproducible from manifests.
+**/node_modules/
+**/.next/
+**/dist/
+**/coverage/
+**/.wrangler/
+*.tsbuildinfo
+
+# Local runtimes and downloaded archives are not project source.
+tools/
+*.zip
+
+# Runtime traces can contain local paths, prompts, or provider responses.
+*.log
+*.sse
+*.out
+*.pid
+
+logs/
+data/
+go-version/.gocache/
+go-version/.gomodcache/
+go-version/bin/

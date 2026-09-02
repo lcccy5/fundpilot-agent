@@ -1,0 +1,6 @@
+package com.jijing.fund.knowledge.domain;
+
+public enum FundDocumentType {
+    PROSPECTUS, PROSPECTUS_UPDATE, ANNUAL_REPORT, SEMI_ANNUAL_REPORT,
+    QUARTERLY_REPORT, FUND_ANNOUNCEMENT, FUND_CONTRACT, OTHER
+}

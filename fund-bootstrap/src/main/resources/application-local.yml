@@ -1,0 +1,67 @@
+spring:
+  config:
+    import:
+      - optional:file:./application-local-private.yml
+      - optional:file:../application-local-private.yml
+  ai:
+    model:
+      chat: ${AI_CHAT_PROVIDER:${jijing.local.ai.chat-provider:none}}
+      embedding: ${AI_EMBEDDING_PROVIDER:${jijing.local.ai.embedding-provider:none}}
+    openai:
+      api-key: ${AI_CHAT_API_KEY:${AI_API_KEY:${jijing.local.ai.chat-api-key:}}}
+      base-url: ${AI_CHAT_BASE_URL:${AI_BASE_URL:${jijing.local.ai.chat-base-url:https://api.openai.com}}}
+      chat:
+        api-key: ${AI_CHAT_API_KEY:${AI_API_KEY:${jijing.local.ai.chat-api-key:}}}
+        base-url: ${AI_CHAT_BASE_URL:${AI_BASE_URL:${jijing.local.ai.chat-base-url:https://api.openai.com}}}
+        options:
+          model: ${AI_CHAT_MODEL:${jijing.local.ai.chat-model:gpt-4.1-mini}}
+          temperature: 0.1
+      embedding:
+        api-key: ${AI_EMBEDDING_API_KEY:${AI_API_KEY:${jijing.local.ai.embedding-api-key:}}}
+        base-url: ${AI_EMBEDDING_BASE_URL:${AI_BASE_URL:${jijing.local.ai.embedding-base-url:https://api.openai.com}}}
+        options:
+          model: ${AI_EMBEDDING_MODEL:${jijing.local.ai.embedding-model:text-embedding-3-small}}
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/jijing_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:${jijing.local.mysql-password:}}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+fund:
+  knowledge:
+    enabled: ${FUND_KNOWLEDGE_ENABLED:${jijing.local.knowledge-enabled:false}}
+    local-root: ${FUND_DOCUMENT_LOCAL_ROOT:./data/knowledge}
+    index-type: ${FUND_KNOWLEDGE_INDEX_TYPE:${jijing.local.knowledge-index-type:local}}
+    elasticsearch-uri: ${ELASTICSEARCH_URI:http://127.0.0.1:9200}
+    index-name: ${ELASTICSEARCH_INDEX:fund_document_chunk_v1}
+    embedding-dimensions: ${AI_EMBEDDING_DIMENSIONS:${jijing.local.ai.embedding-dimensions:1536}}
+    embedding-version: ${AI_EMBEDDING_MODEL:${jijing.local.ai.embedding-model:embedding-v1}}
+    worker:
+      enabled: ${FUND_KNOWLEDGE_WORKER_ENABLED:${jijing.local.knowledge-worker-enabled:false}}
+    authorized-provider-enabled: ${FUND_AUTHORIZED_DOCUMENT_PROVIDER_ENABLED:false}
+    authorized-provider-hosts: ${FUND_AUTHORIZED_DOCUMENT_HOSTS:}
+  agent:
+    enabled: ${FUND_AGENT_ENABLED:${jijing.local.agent-enabled:false}}
+  provider:
+    type: ${FUND_PROVIDER_TYPE:${jijing.local.provider-type:mock}}
+    base-url: ${FUND_DATA_BASE_URL:${jijing.local.provider-base-url:http://127.0.0.1:19090}}
+    history-base-url: ${FUND_DATA_HISTORY_BASE_URL:${jijing.local.provider-history-base-url:https://fundf10.eastmoney.com}}
+    api-key: ${FUND_DATA_API_KEY:}
+  sync:
+    enabled: ${FUND_SYNC_ENABLED:false}
+    distributed-lock-enabled: ${FUND_DISTRIBUTED_LOCK_ENABLED:false}
+
+management:
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_ENABLED:false}

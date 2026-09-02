@@ -1,0 +1,3 @@
+{"id":"xirr-unavailable","question":"没有现金流时 XIRR 必须 UNAVAILABLE 而不是 0","expect":"UNAVAILABLE"}
+{"id":"snapshot-rebuild","question":"删除快照后必须能从流水重建","expect":"rebuild"}
+{"id":"coverage","question":"暴露必须带 disclosureDate 和 coveragePercent","expect":"coverage"}

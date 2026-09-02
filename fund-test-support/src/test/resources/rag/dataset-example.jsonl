@@ -1,0 +1,1 @@
+{"id":"rag-example-0001","question":"基金经理如何解释报告期内回撤？","fundCodes":["000001"],"documentTypes":["QUARTERLY_REPORT"],"relevantChunkIds":["chunk-manual-label"],"requiredEvidenceIds":["DOC:document:version:chunk-manual-label"],"expectedAnswerPoints":["只填写原文明确支持的要点"],"forbiddenClaims":["保证上涨","建议重仓"],"shouldAbstain":false}

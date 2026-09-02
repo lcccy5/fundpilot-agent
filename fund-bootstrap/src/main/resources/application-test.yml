@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: ${MYSQL_TEST_URL:jdbc:mysql://127.0.0.1:3307/jijing_agent_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:test}
+  flyway:
+    enabled: true
+  task:
+    scheduling:
+      enabled: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: 15
+FUND_JWT_SIGNING_KEY: ${FUND_JWT_SIGNING_KEY:test-only-jwt-signing-key-32b-min}
+fund:
+  cache:
+    redis-enabled: false
+  provider:
+    type: mock
+  sync:
+    enabled: false
+    distributed-lock-enabled: false
+  knowledge:
+    enabled: false
+  agent:
+    enabled: false
+  security:
+    bcrypt-strength: 4
+    refresh-cookie-secure: false

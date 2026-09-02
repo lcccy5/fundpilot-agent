@@ -1,0 +1,4 @@
+{"id":"r1","q":"最大回撤是什么意思？","expected":"DIRECT"}
+{"id":"r2","q":"查询 000001 最新资料","expected":"DETERMINISTIC_TOOL"}
+{"id":"r3","q":"000001 最近为什么下跌？","expected":"BOUNDED_REACT"}
+{"id":"r4","q":"比较 000001 110022 161725 并结合我的组合生成报告","expected":"PLAN_AND_EXECUTE"}

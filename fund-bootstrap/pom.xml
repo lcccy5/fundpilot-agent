@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>com.jijing</groupId><artifactId>jijing-agent</artifactId><version>0.1.0-SNAPSHOT</version></parent>
+    <artifactId>fund-bootstrap</artifactId>
+    <dependencies>
+        <dependency><groupId>com.jijing</groupId><artifactId>fund-interface</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.jijing</groupId><artifactId>fund-infrastructure</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.jijing</groupId><artifactId>fund-observability</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.jijing</groupId><artifactId>fund-scheduler</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-redis</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-mysql</artifactId></dependency>
+        <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId><scope>runtime</scope></dependency>
+        <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-registry-prometheus</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot.version}</version>
+                <executions><execution><goals><goal>repackage</goal></goals></execution></executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

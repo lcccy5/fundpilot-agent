@@ -1,0 +1,49 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: jijing-agent-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  elasticsearch:
+    image: elastic/elasticsearch:9.5.2
+    container_name: jijing-agent-elasticsearch
+    profiles: ["knowledge"]
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      # 仅允许本机后端访问，避免把未认证的 ES 暴露到局域网。
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  mysql-test:
+    image: mysql:8.4
+    profiles: ["mysql-test"]
+    container_name: jijing-agent-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: jijing_agent_test
+    ports:
+      - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ptest"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  elasticsearch-data:

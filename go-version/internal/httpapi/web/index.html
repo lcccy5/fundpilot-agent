@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FundScope · 基金分析 Agent</title>
+  <style>
+    :root{--bg:#08110e;--panel:#101d18;--line:#294137;--text:#edf7f1;--muted:#92a99e;--accent:#7be0ad;--gold:#f0c56b;--danger:#ff8d83}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% -10%,#173b2c 0,transparent 35%),var(--bg);color:var(--text);font:15px/1.55 system-ui,"Microsoft YaHei",sans-serif}.shell{max-width:1180px;margin:auto;padding:36px 22px 60px}header{display:flex;align-items:end;justify-content:space-between;margin-bottom:28px}.brand{font-size:32px;font-weight:750;letter-spacing:-1px}.brand span{color:var(--accent)}.tag{color:var(--muted);font-size:13px}.status{padding:7px 12px;border:1px solid var(--line);border-radius:99px;color:var(--accent)}.grid{display:grid;grid-template-columns:1.05fr .95fr;gap:18px}.panel{background:linear-gradient(145deg,rgba(20,38,31,.94),rgba(12,24,19,.96));border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.18)}h2{font-size:17px;margin:0 0 18px}label{display:block;color:var(--muted);font-size:12px;margin-bottom:7px}.row{display:flex;gap:10px}.field{flex:1}input,textarea,button{font:inherit}input,textarea{width:100%;border:1px solid var(--line);background:#0a1511;color:var(--text);border-radius:10px;padding:11px 13px;outline:none}input:focus,textarea:focus{border-color:var(--accent)}button{border:0;border-radius:10px;padding:11px 17px;background:var(--accent);color:#082015;font-weight:700;cursor:pointer}button.alt{background:transparent;color:var(--text);border:1px solid var(--line)}button:hover{filter:brightness(1.08)}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}.metric{background:#0b1712;border:1px solid #21372e;border-radius:12px;padding:14px}.metric b{display:block;font-size:20px;margin-top:5px}.metric small{color:var(--muted)}canvas{width:100%;height:230px;border-radius:12px;background:#0a1511}.chat{height:310px;overflow:auto;background:#0a1511;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}.bubble{margin:0 0 12px;padding:11px 13px;border-radius:10px;white-space:pre-wrap}.user{background:#1b382b;margin-left:15%}.assistant{background:#14231d;margin-right:7%}.evidence{color:var(--gold);font-size:12px;margin-top:7px}.hint{color:var(--muted);font-size:12px;margin-top:10px}.full{grid-column:1/-1}.table{width:100%;border-collapse:collapse}.table th,.table td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}.table th{color:var(--muted);font-size:12px}.error{color:var(--danger)}@media(max-width:800px){.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}header{align-items:start;gap:10px;flex-direction:column}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header><div><div class="brand">Fund<span>Scope</span></div><div class="tag">可验证数据 · 确定性计算 · 受控 Agent</div></div><div class="row"><input id="token" type="password" placeholder="访问令牌（可选）" style="width:170px"><button class="alt" onclick="saveToken()">保存</button><div id="status" class="status">正在检查服务…</div></div></header>
+  <div class="grid">
+    <section class="panel">
+      <h2>基金数据台</h2>
+      <div class="row"><div class="field"><label>基金代码</label><input id="code" value="000001" maxlength="6"></div><div style="align-self:end"><button onclick="loadFund()">开始分析</button></div></div>
+      <div class="hint">默认连接真实公开数据；可在配置中切换演示数据。</div>
+      <div id="fundName" style="font-size:22px;font-weight:700;margin-top:18px">—</div>
+      <div id="metrics" class="metrics"></div>
+      <canvas id="chart" width="720" height="230"></canvas>
+    </section>
+    <section class="panel">
+      <h2>基金 Agent</h2>
+      <div id="chat" class="chat"><div class="bubble assistant">你好，我可以分析单只基金或并行比较多只基金。试试“分析 000001”或“比较 000001 和 000002”。</div></div>
+      <textarea id="question" rows="3" placeholder="输入你的基金问题…">比较 000001 和 000002</textarea>
+      <div class="row" style="margin-top:10px"><button onclick="ask()">发送问题</button><button class="alt" onclick="document.getElementById('chat').innerHTML=''">清空</button></div>
+      <div class="hint">本系统不承诺收益，不执行交易；演示数据不用于真实投资判断。</div>
+    </section>
+    <section class="panel full">
+      <h2>快速对比</h2>
+      <div class="row"><div class="field"><label>基金代码（逗号分隔）</label><input id="codes" value="000001,000002,110022"></div><div style="align-self:end"><button onclick="compare()">生成对比</button></div></div>
+      <div id="comparison" style="margin-top:14px"></div>
+    </section>
+    <section class="panel">
+      <h2>我的持仓</h2>
+      <div class="row"><div class="field"><label>基金代码</label><input id="positionCode" value="000001" maxlength="6"></div><div class="field"><label>份额</label><input id="shares" type="number" value="100"></div><div class="field"><label>成本净值</label><input id="costNav" type="number" step="0.0001" value="1.0000"></div></div>
+      <div class="row" style="margin-top:10px"><button onclick="savePosition()">保存持仓</button><button class="alt" onclick="refreshPortfolio()">刷新分析</button></div>
+      <div id="portfolio" style="margin-top:14px"></div>
+    </section>
+    <section class="panel">
+      <h2>基金知识库</h2>
+      <div class="row"><div class="field"><label>文档标题</label><input id="docTitle" value="基金研究笔记"></div><div class="field"><label>关联基金</label><input id="docCode" value="000001" maxlength="6"></div></div>
+      <textarea id="docContent" rows="4" style="margin-top:10px" placeholder="粘贴公告、季报或研究笔记正文"></textarea>
+      <div class="row" style="margin-top:10px"><button onclick="ingestDocument()">保存并切块</button><input id="knowledgeQuery" placeholder="检索知识库"><button class="alt" onclick="searchKnowledge()">检索</button></div>
+      <div id="knowledge" class="hint"></div>
+    </section>
+  </div>
+</main>
+<script>
+let conversationId='';
+const pct=v=>(v*100).toFixed(2)+'%';
+token.value=localStorage.getItem('fundAgentToken')||'';
+function saveToken(){localStorage.setItem('fundAgentToken',token.value.trim());location.reload()}
+async function api(path,options={}){options.headers=options.headers||{};const saved=localStorage.getItem('fundAgentToken');if(saved)options.headers.Authorization='Bearer '+saved;const r=await fetch(path,options);const body=await r.json();if(!r.ok||!body.success)throw new Error(body.error?.message||'请求失败');return body.data}
+async function boot(){try{const health=await api('/healthz');document.getElementById('status').textContent='服务正常 · '+health.provider;conversationId=(await api('/api/v1/agent/conversations',{method:'POST'})).conversationId;loadFund();refreshPortfolio()}catch(e){document.getElementById('status').textContent='服务异常';document.getElementById('status').classList.add('error')}}
+async function loadFund(){const code=document.getElementById('code').value.trim();try{const [fund,quote,metrics,nav]=await Promise.all([api('/api/v1/funds/'+code),api('/api/v1/funds/'+code+'/quote'),api('/api/v1/funds/'+code+'/metrics'),api('/api/v1/funds/'+code+'/nav')]);document.getElementById('fundName').textContent=fund.name+' · '+fund.code+' · '+quote.status+' '+quote.confirmedNav.toFixed(4);document.getElementById('metrics').innerHTML=[['累计收益',pct(metrics.cumulativeReturn)],['年化收益',pct(metrics.annualizedReturn)],['年化波动',pct(metrics.annualizedVolatility)],['最大回撤',pct(metrics.maxDrawdown.value)],['夏普比率',metrics.sharpeRatio?.toFixed(2)??'不可用'],['数据点',metrics.pointCount]].map(x=>`<div class="metric"><small>${x[0]}</small><b>${x[1]}</b></div>`).join('');draw(nav.items)}catch(e){document.getElementById('fundName').innerHTML='<span class="error">'+escapeHTML(e.message)+'</span>'}}
+function draw(items){const c=document.getElementById('chart'),x=c.getContext('2d'),w=c.width,h=c.height;x.clearRect(0,0,w,h);if(!items.length)return;const values=items.map(i=>i.accumulatedNav),min=Math.min(...values),max=Math.max(...values),pad=24;x.strokeStyle='#294137';x.beginPath();for(let i=0;i<5;i++){let y=pad+i*(h-2*pad)/4;x.moveTo(pad,y);x.lineTo(w-pad,y)}x.stroke();x.strokeStyle='#7be0ad';x.lineWidth=2;x.beginPath();values.forEach((v,i)=>{let px=pad+i*(w-2*pad)/(values.length-1),py=h-pad-(v-min)/(max-min||1)*(h-2*pad);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke()}
+async function ask(){const q=document.getElementById('question').value.trim();if(!q)return;append(q,'user');document.getElementById('question').value='';try{const r=await api('/api/v1/agent/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId,message:q})});append(r.answer,'assistant',r.evidence,r.approval)}catch(e){append(e.message,'assistant') }}
+function append(text,role,evidence,approval){const box=document.getElementById('chat'),div=document.createElement('div');div.className='bubble '+role;div.textContent=text;if(evidence?.length){const ev=document.createElement('div');ev.className='evidence';ev.textContent='证据：'+evidence.map(x=>'['+x.id+'] '+x.source+' · '+x.dataVersion).join('；');div.appendChild(ev)}if(approval){const b=document.createElement('button');b.textContent='批准操作';b.style.marginTop='8px';b.onclick=()=>decide(approval.id,'APPROVE',b);div.appendChild(b)}box.appendChild(div);box.scrollTop=box.scrollHeight}
+async function compare(){const codes=document.getElementById('codes').value.split(/[,，\s]+/).filter(Boolean);const root=document.getElementById('comparison');try{const r=await api('/api/v1/fund-comparisons',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes})});root.innerHTML=`<table class="table"><thead><tr><th>代码</th><th>累计收益</th><th>年化波动</th><th>最大回撤</th><th>夏普</th></tr></thead><tbody>${r.items.map(x=>`<tr><td>${x.fundCode}</td><td>${pct(x.cumulativeReturn)}</td><td>${pct(x.annualizedVolatility)}</td><td>${pct(x.maxDrawdown.value)}</td><td>${x.sharpeRatio?.toFixed(2)??'—'}</td></tr>`).join('')}</tbody></table><div class="hint">${escapeHTML(r.conclusion)}</div>`}catch(e){root.innerHTML='<span class="error">'+escapeHTML(e.message)+'</span>'}}
+async function savePosition(){try{await api('/api/v1/portfolio/positions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fundCode:positionCode.value.trim(),shares:Number(shares.value),costNav:Number(costNav.value)})});refreshPortfolio()}catch(e){portfolio.innerHTML='<span class="error">'+escapeHTML(e.message)+'</span>'}}
+async function refreshPortfolio(){try{const r=await api('/api/v1/portfolio/analysis');portfolio.innerHTML=r.items.length?`<div class="metrics"><div class="metric"><small>总市值</small><b>${r.totalMarketValue.toFixed(2)}</b></div><div class="metric"><small>总盈亏</small><b>${r.totalProfit.toFixed(2)}</b></div><div class="metric"><small>收益率</small><b>${pct(r.totalProfitRate)}</b></div></div><table class="table">${r.items.map(x=>`<tr><td>${x.position.fundCode}</td><td>${x.position.shares} 份</td><td>${pct(x.weight)}</td><td>${pct(x.profitRate)}</td></tr>`).join('')}</table>`:'尚未保存持仓'}catch(e){portfolio.innerHTML='<span class="error">'+escapeHTML(e.message)+'</span>'}}
+async function ingestDocument(){try{const r=await api('/api/v1/knowledge/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:docTitle.value,fundCode:docCode.value,content:docContent.value})});knowledge.textContent='已保存：'+r.title+' · '+r.id}catch(e){knowledge.innerHTML='<span class="error">'+escapeHTML(e.message)+'</span>'}}
+async function searchKnowledge(){try{const r=await api('/api/v1/knowledge/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fundCode:docCode.value,query:knowledgeQuery.value,limit:5})});knowledge.innerHTML=r.map(x=>`<div class="bubble assistant"><b>${escapeHTML(x.title)}</b> · 第 ${x.ordinal+1} 段 · ${x.score.toFixed(3)}<br>${escapeHTML(x.content.slice(0,240))}</div>`).join('')||'没有命中文档'}catch(e){knowledge.innerHTML='<span class="error">'+escapeHTML(e.message)+'</span>'}}
+async function decide(id,decision,button){try{const r=await api('/api/v1/agent/approvals/'+id+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});button.textContent=r.status;button.disabled=true;refreshPortfolio()}catch(e){button.textContent=e.message}}
+function escapeHTML(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}boot();
+</script>
+</body>
+</html>

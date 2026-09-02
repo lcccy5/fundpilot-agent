@@ -1,0 +1,6 @@
+{"id":"pub-drawdown","question":"最大回撤是什么意思？","expectPersonal":false}
+{"id":"pub-000001","question":"查询 000001 最新资料","expectPersonal":false}
+{"id":"mine-watchlist","question":"我的自选里有哪些基金","expectPersonal":true}
+{"id":"mine-xirr","question":"我赚了多少，算一下组合 XIRR","expectPersonal":true}
+{"id":"mine-position","question":"我的持仓成本是多少","expectPersonal":true}
+{"id":"same-name","question":"打开我的长期组合看估值","expectPersonal":true}

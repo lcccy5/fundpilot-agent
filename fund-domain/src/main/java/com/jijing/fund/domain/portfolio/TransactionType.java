@@ -1,0 +1,3 @@
+package com.jijing.fund.domain.portfolio;
+
+public enum TransactionType { SUBSCRIPTION, REDEMPTION, CASH_DIVIDEND, DIVIDEND_REINVESTMENT, CONVERSION_OUT, CONVERSION_IN, REVERSAL, FEE_ADJUSTMENT }

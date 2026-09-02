@@ -1,0 +1,50 @@
+{"id":"route-001","question":"000001 的基本资料","expected":["get_fund_profile","calculate_fund_metrics"]}
+{"id":"route-002","question":"查看 000001 最近一年收益","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-003","question":"000001 最大回撤是多少","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-004","question":"000001 年化波动率","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-005","question":"000001 夏普比率怎么样","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-006","question":"000001 最近涨跌幅","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-007","question":"000001 有哪些风险指标","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-008","question":"查询 000001 历史净值","expected":["get_fund_nav_history","get_fund_profile"]}
+{"id":"route-009","question":"000001 的净值走势","expected":["get_fund_nav_history","get_fund_profile"]}
+{"id":"route-010","question":"000001 某天单位净值","expected":["get_fund_nav_history","get_fund_profile"]}
+{"id":"route-011","question":"比较 000001 和 110022","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-012","question":"000001 vs 110022 哪个回撤小","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-013","question":"给 000001、110022 排名","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-014","question":"对比 000001 和 110022 的波动","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-015","question":"000001 和 110022 哪个收益高","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-016","question":"000001 招募说明书的投资范围","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-017","question":"000001 最新季报说了什么","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-018","question":"000001 年报中的投资策略","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-019","question":"000001 基金经理如何解释回撤","expected":["search_fund_documents","calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-020","question":"000001 公告披露了哪些风险","expected":["search_fund_documents","calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-021","question":"000001 业绩比较基准条款","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-022","question":"查找 000001 定期报告原文","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-023","question":"000001 半年报中的持仓观点","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-024","question":"000001 基金合同条款","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-025","question":"000001 最新披露内容","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-026","question":"比较 000001 和 110022 的季报观点","expected":["search_fund_documents","compare_fund_metrics","get_fund_profile"]}
+{"id":"route-027","question":"000001 回撤是多少，季报如何解释","expected":["search_fund_documents","calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-028","question":"000001 收益和基金经理观点","expected":["search_fund_documents","calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-029","question":"000001 净值走势与公告内容","expected":["search_fund_documents","get_fund_nav_history","get_fund_profile"]}
+{"id":"route-030","question":"对比 000001 和 110022 的招募说明书","expected":["search_fund_documents","compare_fund_metrics","get_fund_profile"]}
+{"id":"route-031","question":"你能做什么","expected":[]}
+{"id":"route-032","question":"你好","expected":[]}
+{"id":"route-033","question":"解释最大回撤的含义","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-034","question":"什么是夏普比率","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-035","question":"怎么看基金风险","expected":["calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-036","question":"基金历史表现代表未来吗","expected":["get_fund_nav_history","get_fund_profile"]}
+{"id":"route-037","question":"查看净值","expected":["get_fund_nav_history","get_fund_profile"]}
+{"id":"route-038","question":"比较两只基金","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-039","question":"哪个基金更好","expected":["compare_fund_metrics","get_fund_profile"]}
+{"id":"route-040","question":"基金公告是什么","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-041","question":"招募说明书有什么用","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-042","question":"基金经理在报告中说什么","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-043","question":"查询投资策略原文","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-044","question":"查看风险披露条款","expected":["search_fund_documents","calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-045","question":"最新定期报告","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-046","question":"基金半年报原文","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-047","question":"基金年报披露","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-048","question":"基金季报投资策略","expected":["search_fund_documents","get_fund_profile"]}
+{"id":"route-049","question":"收益指标与公告解释","expected":["search_fund_documents","calculate_fund_metrics","get_fund_profile"]}
+{"id":"route-050","question":"对比排名并查看季报","expected":["search_fund_documents","compare_fund_metrics","get_fund_profile"]}

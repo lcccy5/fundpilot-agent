@@ -1,0 +1,12 @@
+package com.jijing.fund.infrastructure.knowledge;
+import com.fasterxml.jackson.core.type.TypeReference;import com.fasterxml.jackson.databind.ObjectMapper;import com.jijing.fund.knowledge.domain.*;import com.jijing.fund.knowledge.port.KnowledgeCheckpointStore;import java.nio.file.*;import java.util.*;
+public final class LocalKnowledgeCheckpointStore implements KnowledgeCheckpointStore {
+ private final Path root;private final ObjectMapper mapper;public LocalKnowledgeCheckpointStore(Path root,ObjectMapper mapper){this.root=root.toAbsolutePath().normalize();this.mapper=mapper;}
+ public void saveParsed(String id,ParsedDocument value){write(id,"parsed.json",value);}public ParsedDocument loadParsed(String id){return read(id,"parsed.json",ParsedDocument.class);}
+ public void saveChunks(String id,List<DocumentChunk>value){write(id,"chunks.json",value);}public List<DocumentChunk>loadChunks(String id){return read(id,"chunks.json",new TypeReference<List<DocumentChunk>>(){});}
+ public void saveEmbeddingBatch(String id,int batch,List<float[]>value){write(id,"embedding-"+batch+".json",value);}
+ public List<float[]>loadEmbeddingBatches(String id,int count){List<float[]>all=new ArrayList<>();for(int i=1;i<=count;i++)all.addAll(read(id,"embedding-"+i+".json",new TypeReference<List<float[]>>(){}));return all;}
+ private void write(String id,String name,Object value){try{Path dir=dir(id);Files.createDirectories(dir);Path temp=Files.createTempFile(dir,name,".tmp");mapper.writeValue(temp.toFile(),value);try{Files.move(temp,dir.resolve(name),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}catch(AtomicMoveNotSupportedException e){Files.move(temp,dir.resolve(name),StandardCopyOption.REPLACE_EXISTING);}}catch(Exception e){throw new IllegalStateException("Cannot save ingestion checkpoint",e);}}
+ private <T>T read(String id,String name,Class<T>type){try{return mapper.readValue(dir(id).resolve(name).toFile(),type);}catch(Exception e){throw new IllegalStateException("Cannot restore ingestion checkpoint",e);}}private <T>T read(String id,String name,TypeReference<T>type){try{return mapper.readValue(dir(id).resolve(name).toFile(),type);}catch(Exception e){throw new IllegalStateException("Cannot restore ingestion checkpoint",e);}}
+ private Path dir(String id){if(id==null||!id.matches("[A-Za-z0-9-]+"))throw new IllegalArgumentException("Invalid checkpoint version id");Path value=root.resolve(id).normalize();if(!value.startsWith(root))throw new IllegalArgumentException("Checkpoint path escaped root");return value;}
+}
