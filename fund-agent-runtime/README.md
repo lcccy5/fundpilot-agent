@@ -1,6 +1,6 @@
 # fund-agent-runtime
 
-该模块已经承载 Phase 3 的模型编排、只读基金工具、MySQL 会话记忆、证据引用、执行审计、确定性安全策略和运行指标。模型接入与 Tool Calling 使用 Spring AI，业务执行边界由项目自行实现。详细设计见 [第四部分开发指引](../docs/04-Agent核心编排与基金工具化开发指引.md)。第一版采用受控单 Agent，不提前引入多 Agent Plan/DAG。
+该模块承载 Spring AI 模型编排、只读基金工具、MySQL 会话记忆、证据校验、执行审计和确定性安全策略。复杂任务由持久化 Plan/DAG Runtime 调度，并通过 LangGraph4j 研究子图编排固定角色、条件路由、受限重试和 JDBC 检查点；普通查询继续使用成本更低的直接 Tool 或单 Agent 路径。
 
 会话记忆采用两层预算：普通用户/助手消息保存在 `agent_message`，按近似 Token 预算裁剪，同时保留消息条数安全上限；成功工具结果会确定性序列化为短期 `agent_fact_card`，保存完整 `EvidenceReference`、结构化数据和过期时间。后续轮次只加载仍有效且落在独立 Fact Card Token 预算内的数据，并将对应证据注入当前执行 Trace，使跨轮事实复用仍能通过引用校验；`agent_fact_card_usage` 精确记录每个 Run 实际消费的卡片。该过程不使用 LLM 自由文本摘要。
 

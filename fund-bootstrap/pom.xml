@@ -6,7 +6,6 @@
     <dependencies>
         <dependency><groupId>com.jijing</groupId><artifactId>fund-interface</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.jijing</groupId><artifactId>fund-infrastructure</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.jijing</groupId><artifactId>fund-observability</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.jijing</groupId><artifactId>fund-scheduler</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>

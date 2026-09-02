@@ -1,10 +1,10 @@
-# 基金 Agent 助手
+# FundPilot 基金投研 Agent
 
-项目当前已经落地 Java V3 核心后端：V1～V14 数据库迁移、用户认证与资源归属、持久化自选、个人组合交易流水、持仓/XIRR 计算及 5 个个性化只读 Agent Tool。完整版本验收仍以各版本开发指引的完成定义为准；下一阶段进入 V4 混合 Agent Runtime 2.0，再演进 V5 主动研究与有限多 Agent。
+FundPilot 是基于 Java 21、Spring Boot、Spring AI 与 LangGraph4j 构建的基金投研 Agent。系统采用自研持久化 DAG Runtime 与可恢复研究子图的双层编排架构，覆盖 Hybrid RAG、Claim 级证据校验、多用户 Tool 权限隔离、组合分析和运行审计。
 
 ## 已实现
 
-- Maven 多模块分层：interface / application / domain / infrastructure / agent-runtime / scheduler / observability。
+- Maven 多模块分层：interface / application / domain / infrastructure / agent-runtime / scheduler / test-support / bootstrap。
 - 两个可运行的基金查询 API，默认使用稳定的 Mock 数据。
 - 6 位基金代码校验、统一响应、统一异常、`X-Request-Id` 链路标识。
 - 本机 MySQL + Flyway 数据库迁移配置；MySQL 不使用 Docker。
@@ -63,7 +63,7 @@
 - `GET http://localhost:8080/api/v1/funds/000001`
 - `GET http://localhost:8080/api/v1/funds/000001/nav?startDate=2026-01-01&endDate=2026-01-31`
 - `GET http://localhost:8080/api/v1/funds/000001/metrics?startDate=2026-01-01&endDate=2026-01-31&navBasis=ACCUMULATED_NAV`
-- `POST http://localhost:8080/api/v1/fund-comparisons`，JSON 请求体见第三部分开发指引。
+- `POST http://localhost:8080/api/v1/fund-comparisons`，请求体包含 2～10 个基金代码、起止日期和净值口径。
 - `GET http://localhost:8080/actuator/health`
 - `GET http://localhost:8080/actuator/prometheus`
 
@@ -106,20 +106,7 @@ $env:FUND_KNOWLEDGE_INDEX_TYPE = 'local'
 
 交易日历表在 Phase 2 已建好，但日历数据必须来自可追踪的真实数据源，项目不会拿“周一到周五”冒充中国交易日。未导入日历时覆盖率返回 `UNKNOWN`，收益与回撤仍可计算，接口不会中断。
 
-## 开发指引
+## 相关文档
 
-- [Go 成品版：真实数据、持久化、Tool Calling、组合、RAG 与 HITL](go-version/README.md)
-- [Go 版总体开发指引：架构、Agent Runtime 与完整开发路线](docs/00-Go版基金Agent总体开发指引.md)
-- [Go 版 V2～V6 后续版本开发大纲](docs/07-Go版后续版本开发大纲.md)
-- [Java 版 V1 基线及 V2～V6 后续版本开发大纲](docs/08-Java版后续版本开发大纲.md)
-- [Java 版 V2：真实能力工程收口与质量评测开发指引](docs/09-Java版V2真实能力工程收口开发指引.md)
-- [Java 版 V3：多用户个人组合与个性化 Agent 开发指引](docs/10-Java版V3多用户个人组合与个性化Agent开发指引.md)
-- [Java 版 V4：混合 Agent Runtime 2.0 开发指引](docs/11-Java版V4混合AgentRuntime2.0开发指引.md)
-- [Java 版 V5：主动研究与有限多 Agent 开发指引](docs/12-Java版V5主动研究与有限多Agent开发指引.md)
-- [第一部分：项目初始化与基础架构](docs/01-项目初始化与基础架构开发指引.md)
-- [第二部分：真实基金数据与持久化](docs/02-真实基金数据与持久化开发指引.md)
-- [第三部分：基金指标计算与多基金对比](docs/03-基金指标计算与多基金对比开发指引.md)
-- [第四部分：Agent 核心编排、基金 Tool Calling 与证据化回答](docs/04-Agent核心编排与基金工具化开发指引.md)
-- [第五部分：基金文档 RAG、混合检索与可验证引用](docs/05-基金文档RAG与混合检索开发指引.md)
-- [第六部分：真实 RAG 环境、异步摄取与质量门禁](docs/06-真实RAG环境与质量门禁开发指引.md)
-- [Phase 4-B 运行与验收手册](docs/Phase4B-运行验收手册.md)
+- [运行与验收手册](docs/Phase4B-运行验收手册.md)
+- [外部基金数据 Provider 契约](docs/provider-http-contract.md)
