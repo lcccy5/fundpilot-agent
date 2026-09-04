@@ -78,7 +78,7 @@ public class SpringAiFundAgentService implements FundAgentUseCase,AutoCloseable 
         repository.recordFactCardUsage(runId,factContext.cardIds(),started);
         AgentExecutionTrace trace=new AgentExecutionTrace(request.conversationId(),runId,repository,mapper,maxToolCalls,properties.maxRepeatedIdenticalToolCall(),properties.toolTimeout(),properties.factCardDefaultTtl(),event->{});
         trace.seedEvidence(factContext.evidence());
-        try{safetyPolicy.validateInput(request.message());ChatResponse response=invokeWithTimeout(request,trace,factContext.systemPrompt(),prompt);String answer=response.getResult().getOutput().getText();if(answer==null||answer.isBlank())throw new AgentModelUnavailableException("Model returned an empty answer",null);
+        try{safetyPolicy.validateInput(request.message());ChatResponse response=invokeWithTimeout(request,trace,factContext.systemPrompt(),prompt,runId);String answer=response.getResult().getOutput().getText();if(answer==null||answer.isBlank())throw new AgentModelUnavailableException("Model returned an empty answer",null);
             safetyPolicy.validateAnswer(answer);answer=citationPolicy.validateAndRepair(answer,trace.evidence());TokenUsage usage=usage(response);Instant completed=clock.instant();long duration=Duration.between(started,completed).toMillis();
             repository.completeRun(runId,Math.max(1,trace.toolCalls()+1),trace.toolCalls(),usage,duration,completed);
             recordMetrics("success",duration);
@@ -103,7 +103,7 @@ public class SpringAiFundAgentService implements FundAgentUseCase,AutoCloseable 
         trace.seedEvidence(factContext.evidence());
         AtomicBoolean audited=new AtomicBoolean();StringBuilder answer=new StringBuilder();StringBuilder sentenceBuffer=new StringBuilder();AtomicReference<ChatResponse> lastResponse=new AtomicReference<>();
         try{safetyPolicy.validateInput(request.message());}catch(RuntimeException ex){fail(runId,"REJECTED","AGENT_POLICY_VIOLATION",ex,trace,started);audited.set(true);throw ex;}
-        Flux<FundAgentEvent> deltas=chatClient.prompt().system(factContext.systemPrompt()).user(request.message()).options(metadataOptions(request,prompt)).tools(router.toolsFor(request.message()))
+        Flux<FundAgentEvent> deltas=chatClient.prompt().system(factContext.systemPrompt()).user(request.message()).options(metadataOptions(request,prompt,runId)).tools(router.toolsFor(request.message()))
                 .toolContext(toolContext(trace,request.actor())).advisors(a->a.param(ChatMemory.CONVERSATION_ID,request.conversationId()))
                 .stream().chatResponse().timeout(properties.runTimeout()).handle((response,sink)->{
                     lastResponse.set(response);String delta=response.getResult()==null||response.getResult().getOutput()==null?null:response.getResult().getOutput().getText();
@@ -122,7 +122,7 @@ public class SpringAiFundAgentService implements FundAgentUseCase,AutoCloseable 
     });}
     
     /** 执行 invokeWithTimeout 操作，并应用相应的 Agent 运行时状态变化。 */
-    private ChatResponse invokeWithTimeout(FundAgentRequest request,AgentExecutionTrace trace,String systemPrompt,ResolvedFundAgentPrompt prompt){Future<ChatResponse> future=executor.submit(()->chatClient.prompt().system(systemPrompt).user(request.message()).options(metadataOptions(request,prompt)).tools(router.toolsFor(request.message()))
+    private ChatResponse invokeWithTimeout(FundAgentRequest request,AgentExecutionTrace trace,String systemPrompt,ResolvedFundAgentPrompt prompt,String runId){Future<ChatResponse> future=executor.submit(()->chatClient.prompt().system(systemPrompt).user(request.message()).options(metadataOptions(request,prompt,runId)).tools(router.toolsFor(request.message()))
                 .toolContext(toolContext(trace,request.actor())).advisors(a->a.param(ChatMemory.CONVERSATION_ID,request.conversationId())).call().chatResponse());
         try{return future.get(properties.runTimeout().toMillis(),TimeUnit.MILLISECONDS);}catch(TimeoutException ex){future.cancel(true);throw new AgentModelUnavailableException("Agent run timed out",ex);}catch(InterruptedException ex){Thread.currentThread().interrupt();throw new AgentModelUnavailableException("Agent run interrupted",ex);}catch(ExecutionException ex){Throwable cause=ex.getCause();if(cause instanceof RuntimeException runtime)throw runtime;throw new AgentModelUnavailableException("Agent model execution failed",cause);}}
     
@@ -188,8 +188,10 @@ public class SpringAiFundAgentService implements FundAgentUseCase,AutoCloseable 
     /** 在 Agent 运行时边界间传递 FactContext 数据的不可变值对象。 */
     private record FactContext(String systemPrompt,List<EvidenceReference>evidence,List<String>cardIds){}
     /** Injects request, prompt and release metadata into each OpenAI-compatible gateway call. */
-    private OpenAiChatOptions metadataOptions(FundAgentRequest request,ResolvedFundAgentPrompt prompt){
-        Map<String,String> headers=new LinkedHashMap<>();headers.put("X-AgentOps-Run-Id",request.requestId());headers.put("Prompt-Version",prompt.version());
+    private OpenAiChatOptions metadataOptions(FundAgentRequest request,ResolvedFundAgentPrompt prompt,String runId){
+        // One Agent run can trigger several provider requests; the gateway keeps each request id unique
+        // while this stable correlation id groups every Reservation and Ledger entry for the user turn.
+        Map<String,String> headers=new LinkedHashMap<>();headers.put("X-AgentOps-Correlation-Id",runId);headers.put("Prompt-Version",prompt.version());
         if(prompt.releaseId()!=null)headers.put("Release-Id",prompt.releaseId());if(prompt.variant()!=null)headers.put("Variant",prompt.variant());
         return OpenAiChatOptions.builder().httpHeaders(headers).streamUsage(true).build();
     }

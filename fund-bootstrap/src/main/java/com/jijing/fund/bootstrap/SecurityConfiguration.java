@@ -29,7 +29,10 @@ class SecurityConfiguration implements WebMvcConfigurer {
     @Bean HmacJwtTokenCodec jwtCodec(@Value("${FUND_JWT_SIGNING_KEY:}") String key,@Value("${fund.security.issuer:jijing-agent}") String issuer,@Value("${fund.security.audience:fund-web}") String audience,@Value("${FUND_JWT_KEY_ID:local-v1}") String keyId,ObjectMapper mapper){return new HmacJwtTokenCodec(key,issuer,audience,keyId,mapper);}
     @Bean AuthUseCase authUseCase(UserAccountRepository users,PasswordHasher hashes,HmacJwtTokenCodec codec,Clock clock,@Value("${fund.security.access-token-ttl:15m}") Duration access,@Value("${fund.security.refresh-token-ttl:30d}") Duration refresh){return new AuthApplicationService(users,hashes,codec,clock,access,refresh);}
     @Bean SecurityFilterChain securityFilterChain(HttpSecurity http,HmacJwtTokenCodec codec,UserAccountRepository users)throws Exception{
+        // The original SSE request is authenticated before MVC starts async processing; allow only its
+        // container redispatches so a committed stream is not rejected when Flux emits or completes.
         http.csrf(csrf->csrf.disable()).sessionManagement(s->s.sessionCreationPolicy(SessionCreationPolicy.STATELESS)).cors(c->{}).exceptionHandling(e->e.authenticationEntryPoint((req,res,ex)->{res.setStatus(401);res.setContentType("application/json");res.getWriter().write("{\"error\":\"UNAUTHORIZED\"}");})).authorizeHttpRequests(a->a
+                .dispatcherTypeMatchers(DispatcherType.ASYNC,DispatcherType.ERROR).permitAll()
                 .requestMatchers("/actuator/health","/actuator/info","/api/v1/auth/**").permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/funds/**").permitAll()
                 .requestMatchers("/internal/**").hasAnyRole("ANALYST","ADMIN")
