@@ -8,6 +8,8 @@ import java.util.regex.Pattern;
 /** 实现 RuleBasedPlanner 所代表的 Agent 运行时职责。 */
 public final class RuleBasedPlanner {
     private static final Pattern FUND=Pattern.compile("\\d{6}");
+    /** Unit NAV is available from every supported local provider and keeps one plan internally consistent. */
+    private static final String DEFAULT_NAV_BASIS="UNIT_NAV";
     private final Clock clock;
     
     /** 执行该 Agent 运行时组件中的 RuleBasedPlanner 操作。 */
@@ -31,9 +33,9 @@ public final class RuleBasedPlanner {
         for(String fund:funds){
             String key="metrics-"+fund;
             metricKeys.add(key);
-            tasks.add(new PlanTaskDraft(key,"FUND_METRICS_QUERY",Map.of("fundCode",fund,"startDate",startDate.toString(),"endDate",endDate.toString(),"navBasis","ADJUSTED_NAV"),List.of(),List.of("FUND_METRICS")));
+            tasks.add(new PlanTaskDraft(key,"FUND_METRICS_QUERY",Map.of("fundCode",fund,"startDate",startDate.toString(),"endDate",endDate.toString(),"navBasis",DEFAULT_NAV_BASIS),List.of(),List.of("FUND_METRICS")));
         }
-        tasks.add(new PlanTaskDraft("compare","FUND_COMPARE",Map.of("fundCodes",funds,"startDate",startDate.toString(),"endDate",endDate.toString(),"navBasis","ADJUSTED_NAV"),List.copyOf(metricKeys),List.of("FUND_COMPARE")));
+        tasks.add(new PlanTaskDraft("compare","FUND_COMPARE",Map.of("fundCodes",funds,"startDate",startDate.toString(),"endDate",endDate.toString(),"navBasis",DEFAULT_NAV_BASIS),List.copyOf(metricKeys),List.of("FUND_COMPARE")));
         List<String> beforeVerify=new ArrayList<>(List.of("compare"));
         if(personal){
             tasks.add(new PlanTaskDraft("portfolio","PORTFOLIO_SNAPSHOT",Map.of("scope","default"),List.of("compare"),List.of("PORTFOLIO_SNAPSHOT")));
@@ -42,7 +44,7 @@ public final class RuleBasedPlanner {
         tasks.add(new PlanTaskDraft("verify","REPORT_VERIFY",Map.of(),List.copyOf(beforeVerify),List.of("VERIFICATION")));
         tasks.add(new PlanTaskDraft("write","REPORT_WRITE",Map.of(),List.of("verify"),List.of("REPORT")));
         if(export)tasks.add(new PlanTaskDraft("export","REPORT_EXPORT",Map.of("format","markdown"),List.of("write"),List.of("EXPORT")));
-        return new PlanDraft(text,Map.of("fundCodes",funds,"startDate",startDate.toString(),"endDate",endDate.toString(),"navBasis","ADJUSTED_NAV"),Map.of("maxTasks",20,"maxToolCalls",20),List.copyOf(tasks));
+        return new PlanDraft(text,Map.of("fundCodes",funds,"startDate",startDate.toString(),"endDate",endDate.toString(),"navBasis",DEFAULT_NAV_BASIS),Map.of("maxTasks",20,"maxToolCalls",20),List.copyOf(tasks));
     }
 
     /** Builds the single outer task that owns the complete resumable LangGraph4j catalyst workflow. */

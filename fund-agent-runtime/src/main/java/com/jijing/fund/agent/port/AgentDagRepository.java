@@ -43,6 +43,9 @@ public interface AgentDagRepository {
     
     /** 通过 completeTask 操作更新持久化或内存中的运行状态。 */
     void completeTask(String taskId,String executionKey,String outputUri,List<String> evidenceIds,Instant now);
+
+    /** Records a non-retryable task error and exposes its reason through the owned run events. */
+    void failTask(String taskId,String reason,Instant now);
     
     /** 通过 markWaitingApproval 操作更新持久化或内存中的运行状态。 */
     void markWaitingApproval(String taskId,String approvalId,Instant now);

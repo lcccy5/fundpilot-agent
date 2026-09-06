@@ -1,6 +1,8 @@
 package com.jijing.fund.interfaces.web;
 
 import com.jijing.fund.agent.api.*;
+import com.jijing.fund.agent.verification.ReportWriter;
+import com.jijing.fund.agent.verification.VerificationReport;
 import com.jijing.fund.interfaces.api.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -46,6 +48,16 @@ public class FundAgentController {
     public ApiResponse<AgentPlanView> getPlan(@CurrentUser AuthenticatedUser actor,@PathVariable("runId") String runId,HttpServletRequest request){
         return ApiResponse.success(RequestIdFilter.get(request),runs.plan(runId,actor.userId().value()));
     }
+    /** Returns the readable report only after the owned run has completed its report-writing task. */
+    @GetMapping("/runs/{runId}/report")
+    public ApiResponse<ResearchReport> getReport(@CurrentUser AuthenticatedUser actor,@PathVariable("runId") String runId,HttpServletRequest request){
+        var plan=runs.plan(runId,actor.userId().value());
+        var writer=plan.tasks().stream().filter(task->"REPORT_WRITE".equals(task.capabilityType())&&"SUCCEEDED".equals(task.status())&&task.outputUri()!=null).findFirst()
+                .orElseThrow(()->new IllegalStateException("research report is not ready"));
+        var evidence=plan.tasks().stream().filter(task->"SUCCEEDED".equals(task.status())&&task.outputUri()!=null).map(AgentTaskView::outputUri).toList();
+        String content=new ReportWriter().write(new VerificationReport(true,java.util.List.of(),evidence),plan.tasks());
+        return ApiResponse.success(RequestIdFilter.get(request),new ResearchReport(writer.outputUri(),content,evidence.size()));
+    }
     @GetMapping("/runs/{runId}/events")
     public ApiResponse<java.util.List<AgentRunEventView>> getEvents(@CurrentUser AuthenticatedUser actor,@PathVariable("runId") String runId,@RequestHeader(name="Last-Event-ID",required=false) String lastEventId,@RequestParam(name="after",required=false) Long after,HttpServletRequest request){
         Long cursor=after;if(cursor==null&&lastEventId!=null)try{cursor=Long.parseLong(lastEventId);}catch(NumberFormatException ignored){cursor=0L;}
@@ -76,4 +88,6 @@ public class FundAgentController {
     public record ChatRequest(@NotBlank String conversationId,@NotBlank @Size(max=2000) String message){}
     public record RunRequest(String conversationId,@NotBlank @Size(max=2000) String message){}
     public record ApprovalBody(String parameters){}
+    /** The report body is constructed server-side to keep task ownership checks at the API boundary. */
+    public record ResearchReport(String artifactUri,String content,int evidenceCount){}
 }

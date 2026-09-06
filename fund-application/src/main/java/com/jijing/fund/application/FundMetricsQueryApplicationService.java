@@ -42,12 +42,17 @@ public class FundMetricsQueryApplicationService implements FundMetricsQueryUseCa
         NavSeries series = new NavSeries(code,basis,start,end,observations,DataCoverage.of(observations.size(),expected),dataVersion);
         FundMetrics result = calculator.calculate(series,context); cache.put(key,result); return result;
     }
+    /**
+     * Resolves the requested NAV basis without blocking a research task when an upstream
+     * provider does not publish adjusted NAV. Unit NAV keeps the series comparable within
+     * the same task; the returned metrics still disclose the actual basis to callers.
+     */
     private NavBasis resolveBasis(String requested, List<NavPoint> points) {
         if (requested == null || requested.isBlank()) return points.stream().allMatch(p -> p.accumulatedNav()!=null) ? NavBasis.ACCUMULATED_NAV : NavBasis.UNIT_NAV;
         try {
             NavBasis basis = NavBasis.valueOf(requested.toUpperCase(Locale.ROOT));
             if (basis == NavBasis.ACCUMULATED_NAV && points.stream().anyMatch(p -> p.accumulatedNav()==null)) throw new UnsupportedNavBasisException("Accumulated NAV is incomplete");
-            if (basis == NavBasis.ADJUSTED_NAV && points.stream().anyMatch(p -> p.adjustedNav()==null)) throw new UnsupportedNavBasisException("Adjusted NAV is unavailable");
+            if (basis == NavBasis.ADJUSTED_NAV && points.stream().anyMatch(p -> p.adjustedNav()==null)) return NavBasis.UNIT_NAV;
             return basis;
         } catch (IllegalArgumentException ex) { throw new UnsupportedNavBasisException("Unsupported nav basis: " + requested); }
     }

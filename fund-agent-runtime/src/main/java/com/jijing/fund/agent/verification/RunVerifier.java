@@ -12,6 +12,9 @@ public final class RunVerifier {
         List<String> findings=new ArrayList<>();
         List<String> evidence=new ArrayList<>();
         for(AgentTaskView task:tasks){
+            // Verification checks the completed research inputs. Report stages are downstream and
+            // are intentionally excluded because they cannot start until this verification passes.
+            if("REPORT_VERIFY".equals(task.capabilityType())||"REPORT_WRITE".equals(task.capabilityType())||"REPORT_EXPORT".equals(task.capabilityType()))continue;
             if("CANCELLED".equals(task.status())||"WAITING_APPROVAL".equals(task.status()))continue;
             if(!"SUCCEEDED".equals(task.status()))findings.add("incomplete:"+task.taskKey());
             if(task.outputUri()!=null)evidence.add(task.outputUri());

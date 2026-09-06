@@ -46,6 +46,8 @@ async function refreshOnce(){
   return true;
 }
 
+// Existing callers progressively type API responses; the permissive default preserves legacy endpoints.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function api<T=any>(path:string,init:RequestInit={}):Promise<T>{
   const headers=new Headers(init.headers);
   if(accessToken)headers.set('Authorization',`Bearer ${accessToken}`);

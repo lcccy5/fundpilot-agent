@@ -127,6 +127,23 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
         }
     }
 
+    /**
+     * Makes a task failure terminal and cancels dependent work that cannot produce a valid report.
+     * The failure reason is published as an event for the owner-facing progress screen.
+     */
+    @Override public void failTask(String taskId,String reason,Instant now){
+        synchronized(lock){
+            TaskState task=tasks.get(taskId);if(task==null)return;
+            RunState run=runs.get(task.runId);if(run==null||"CANCELLED".equals(run.status))return;
+            task.status="FAILED";task.leaseUntil=null;
+            for(TaskState candidate:tasks.values())if(run.runId.equals(candidate.runId)&&!"SUCCEEDED".equals(candidate.status)&&!candidate.taskId.equals(taskId))candidate.status="CANCELLED";
+            run.status="FAILED";
+            String detail=reason==null||reason.isBlank()?"任务执行失败":reason.replace("\\","\\\\").replace("\"","'").replace("\n"," ");
+            appendUnlocked(run,"task.failed","{\"taskKey\":\""+task.taskKey+"\",\"reason\":\""+detail+"\"}",now);
+            appendUnlocked(run,"run.failed","{\"runId\":\""+run.runId+"\",\"reason\":\""+detail+"\"}",now);
+        }
+    }
+
     @Override 
     /** 通过 markWaitingApproval 操作更新持久化或内存中的运行状态。 */
     public void markWaitingApproval(String taskId,String approvalId,Instant now){

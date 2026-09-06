@@ -26,7 +26,10 @@ public final class PlanTaskWorker {
     public PlanTaskWorker(AgentDagRepository dag,CapabilityExecutorRegistry executors){this.dag=dag;this.executors=executors;}
 
     
-    /** 通过 claimAndExecute 操作更新持久化或内存中的运行状态。 */
+    /**
+     * Claims one ready task, persists successful output, and converts execution exceptions
+     * into a terminal task failure so scheduled workers do not repeatedly re-run bad input.
+     */
     public Optional<String> claimAndExecute(String workerId,Instant now,Duration lease){
         Optional<ClaimedTask> claimed=dag.claimReady(workerId,now,lease);
         if(claimed.isEmpty())return Optional.empty();
@@ -42,8 +45,13 @@ public final class PlanTaskWorker {
             dag.completeTask(task.taskId(),key,"artifact://reused/"+key,List.of("ev-reuse"),now);
             return Optional.of(task.taskId());
         }
-        var result=executors.require(task.capabilityType()).execute(new CapabilityExecutionContext(task));
-        dag.completeTask(task.taskId(),key,result.outputUri(),result.evidenceIds(),now);
+        try{
+            var result=executors.require(task.capabilityType()).execute(new CapabilityExecutionContext(task));
+            dag.completeTask(task.taskId(),key,result.outputUri(),result.evidenceIds(),now);
+        }catch(RuntimeException error){
+            String reason=error.getMessage()==null?error.getClass().getSimpleName():error.getMessage();
+            dag.failTask(task.taskId(),reason,now);
+        }
         return Optional.of(task.taskId());
     }
 

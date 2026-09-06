@@ -316,7 +316,7 @@ function Chart({ points }: { points: Nav[] }) {
         <b>{v.at(-1)?.toFixed(4)}</b>
         <span className={change >= 0 ? "up" : "down"}>
           {change >= 0 ? "+" : ""}
-          {change.toFixed(2)}% · 近一年
+          {change.toFixed(2)}% · 区间单位净值变化
         </span>
       </div>
       <svg
@@ -343,12 +343,11 @@ function Chart({ points }: { points: Nav[] }) {
 }
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview"),
-    [code, setCode] = useState("000001"),
+    [code, setCode] = useState(() => typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('code')?.replace(/\D/g,'').slice(0,6) ?? ''),
     [fund, setFund] = useState<Fund | null>(null),
     [points, setPoints] = useState<Nav[]>([]),
     [notice, setNotice] = useState("实时研究环境已连接"),
     [loading, setLoading] = useState(false),
-    [watch, setWatch] = useState<Fund[]>([]),
     [cid, setCid] = useState<string>(),
     [q, setQ] = useState("这只基金适合什么风险偏好的投资者？"),
     [messages, setMessages] = useState<Msg[]>([
@@ -361,6 +360,7 @@ export default function Home() {
     [agentLoading, setAgentLoading] = useState(false),
     [steps, setSteps] = useState<string[]>([]);
   const agentRef = useRef<HTMLElement>(null);
+  /** Loads profile and NAV together so the detail view never mixes two funds. */
   const sync = async (e?: FormEvent) => {
     e?.preventDefault();
     const id = code.padStart(6, "0");
@@ -389,7 +389,8 @@ export default function Home() {
         throw Error(profile.message ?? profile.msg ?? "基金资料暂不可用");
       if (!b.ok)
         throw Error(history.message ?? history.msg ?? "历史净值暂不可用");
-      setFund(profile.data ?? (profile as Fund));
+      const loadedFund=profile.data ?? (profile as Fund);
+      setFund(loadedFund);
       setPoints(chronologicalNavPoints((history.data ?? history).items ?? []));
       setTab("overview");
       setNotice("已加载公开基金资料 · 数据仅供研究参考");
@@ -399,10 +400,11 @@ export default function Home() {
       setLoading(false);
     }
   };
+  /** Sends the current fund identity with the question to avoid ambiguous AI research. */
   const ask = async (e: FormEvent) => {
     e.preventDefault();
     if (!q.trim() || agentLoading) return;
-    const text = q;
+    const text = fund ? `研究对象：${fund.name}（${fund.fundCode}）\n问题：${q}` : q;
     setMessages((x) => [...x, { role: "user", content: text }]);
     setQ("");
     setAgentLoading(true);
@@ -561,39 +563,36 @@ export default function Home() {
       setAgentLoading(false);
     }
   };
+  /** Saves a guest watch item locally and directs the user to the full watchlist. */
   const add = () => {
-    if (fund && !watch.some((x) => x.fundCode === fund.fundCode)) {
-      setWatch((x) => [...x, fund]);
-      saveGuestWatch([...guestWatch(), fund.fundCode]);
-    }
-    setTab("watchlist");
+    if (!fund) return;
+    const codes=guestWatch();
+    if(codes.includes(fund.fundCode)){setNotice('这只基金已加入本设备自选');return;}
+    saveGuestWatch([...codes, fund.fundCode]);
+    setNotice('已加入本设备自选；登录后可同步到云端');
   };
   const overview = (
     <>
       <section className="hero">
         <div>
-          <em>实时研究工作台</em>
-          <h2>{fund?.name ?? "输入一只基金，开始你的研究"}</h2>
+          <em>{fund ? '基金详情' : '从一只基金开始'}</em>
+          <h2>{fund?.name ?? "查净值、看风险，再做决定"}</h2>
           <p>
             {fund?.fundType ??
-              "查看真实净值、历史收益和回撤，再由 AI 给出可追溯的研究解读。"}
+              "输入基金名称或 6 位代码，查看公开净值与研究依据。"}
           </p>
           <mark>{fund?.fundCode ?? "基金代码"}</mark>
           {fund?.managementCompany && <mark>{fund.managementCompany}</mark>}
         </div>
         <div className="orb">
-          <b>
-            AI
-            <br />
-            INSIGHT
-          </b>
+          <b>{fund ? '已加载\n公开资料' : '净值\n研究'}</b>
         </div>
       </section>
       <section className="stats">
         <article>
-          <small>数据来源</small>
+          <small>资料来源</small>
           <b>{fund?.dataSource ?? "第三方基金数据"}</b>
-          <em>公开数据同步</em>
+          <em>{fund ? '以详情数据为准' : '查询后展示'}</em>
         </article>
         <article>
           <small>最新单位净值</small>
@@ -601,20 +600,21 @@ export default function Home() {
           <em>{points.at(-1)?.navDate ?? "等待查询"}</em>
         </article>
         <article>
-          <small>基金类型</small>
-          <b>{fund?.fundType ?? "—"}</b>
-          <em>产品资料</em>
+          <small>数据截至</small>
+          <b>{points.at(-1)?.navDate ?? '—'}</b>
+          <em>最新可用净值日</em>
         </article>
         <article>
-          <small>管理人</small>
-          <b>{fund?.managementCompany ?? "—"}</b>
-          <em>产品资料</em>
+          <small>基金经理</small>
+          <b>{fund?.fundManager ?? '—'}</b>
+          <em>{fund ? '产品资料' : '查询后展示'}</em>
         </article>
       </section>
       <section className="grid">
         <article className="card chart">
-          <p>PERFORMANCE · REAL NAV</p>
-          <h3>单位净值与趋势</h3>
+          <p>NET ASSET VALUE</p>
+          <h3>单位净值走势</h3>
+          <small className="data-caption">净值变化不等同于实际持有收益；区间以图表日期为准。</small>
           <Chart points={points} />
         </article>
         <article className="card profile">
@@ -642,45 +642,13 @@ export default function Home() {
               <dd>{fund?.establishedDate ?? "—"}</dd>
             </div>
           </dl>
-          <button onClick={() => sync()}>更新数据 →</button>
-          <button className="text-button" onClick={add}>
-            加入自选 ＋
-          </button>
+          <button onClick={() => sync()} disabled={loading}>{loading?'更新中…':'更新数据'}</button>
+          <button className="text-button" onClick={add}>加入自选</button>
         </article>
       </section>
     </>
   );
   let panel = overview;
-  if (tab === "watchlist")
-    panel = (
-      <section className="workspace">
-        <p>WATCHLIST</p>
-        <h2>我的自选</h2>
-        {watch.length ? (
-          <div className="watch-list">
-            {watch.map((x) => (
-              <button
-                key={x.fundCode}
-                onClick={() => {
-                  setCode(x.fundCode);
-                  setFund(x);
-                  setTab("overview");
-                }}
-              >
-                {x.name}
-                <small>
-                  {x.fundCode} · {x.fundType ?? "基金"}
-                </small>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-panel">
-            还没有自选基金。查询基金后可在资料卡中加入自选。
-          </div>
-        )}
-      </section>
-    );
   if (tab === "insights")
     panel = (
       <section className="workspace">
@@ -727,13 +695,15 @@ export default function Home() {
       <form className="search" onSubmit={sync}>
         <span>⌕</span>
         <input
+          aria-label="基金代码"
           value={code}
           onChange={(e) =>
             setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
           }
         />
-        <button>{loading ? "同步中" : "查询基金"}</button>
+        <button disabled={loading}>{loading ? "查询中…" : "查询基金"}</button>
       </form>
+      <p className="search-help">目前支持 6 位基金代码，例如 000001。查询后可加入自选或继续研究。</p>
       {panel}
       <section className="agent" ref={agentRef}>
         <div className="agent-title">
@@ -783,12 +753,12 @@ export default function Home() {
             disabled={agentLoading}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="例如：这只基金近一年回撤如何？"
+            placeholder={fund?`问问 ${fund.name} 的表现与风险`:'先查询基金，再开始研究'}
           />
           <button disabled={agentLoading}>{agentLoading ? "…" : "↑"}</button>
         </form>
         <small>
-          显示的是可审计的执行轨迹，不展示模型隐藏思维链。回答仅供研究参考。个性化问题请先登录。
+          {fund?`正在研究：${fund.name}（${fund.fundCode}）`:'请先查询一只基金。'} 回答仅供研究参考，数据日期以引用来源为准。
         </small>
       </section>
     </AppShell>

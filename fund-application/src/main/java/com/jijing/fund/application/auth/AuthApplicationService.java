@@ -35,7 +35,11 @@ public class AuthApplicationService implements AuthUseCase {
     }
     private static String hash(String value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}catch(NoSuchAlgorithmException e){throw new IllegalStateException(e);}}
     private static String normalize(String value){if(value==null)return "";String out=value.trim().toLowerCase(Locale.ROOT);if(!out.matches("[a-z0-9_.-]{3,64}"))throw new AuthException("username must be 3-64 lowercase letters, numbers, dot, dash or underscore");return out;}
-    private static void validatePassword(String value){if(value==null||value.length()<10||value.length()>128)throw new AuthException("password must be 10-128 characters");}
+    /**
+     * Enforces the password length agreed by the registration UI and API contract.
+     * The check remains in the application layer so non-HTTP callers cannot bypass it.
+     */
+    private static void validatePassword(String value){if(value==null||value.length()<6||value.length()>128)throw new AuthException("password must be 6-128 characters");}
     private static String displayName(String value,String fallback){String out=value==null?"":value.trim();return out.isBlank()?fallback:out.length()>80?out.substring(0,80):out;}
     private static UserView view(UserAccount account){return new UserView(account.userId(),account.normalizedUsername(),account.displayName(),account.roles());}
 }

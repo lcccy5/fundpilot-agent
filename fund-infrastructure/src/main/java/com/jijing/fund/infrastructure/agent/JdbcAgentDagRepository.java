@@ -153,6 +153,25 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
             appendEvent(runId,"run.completed","{\"runId\":\""+runId+"\"}",now);
         }
     }
+    /**
+     * Records a terminal task error and stops dependent work, because a report without this input
+     * would be misleading. The reason is kept in owner-visible run events for diagnosis.
+     */
+    @Override @Transactional public void failTask(String taskId,String reason,Instant now){
+        var rows=jdbc.query("SELECT t.plan_id,p.run_id,t.task_key,r.status FROM agent_task t JOIN agent_plan p ON p.plan_id=t.plan_id JOIN agent_run r ON r.run_id=p.run_id WHERE t.task_id=?",
+                (rs,n)->new String[]{rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4)},taskId);
+        if(rows.isEmpty())return;
+        String[] row=rows.getFirst();
+        if("CANCELLED".equals(row[3]))return;
+        String detail=truncate(reason==null||reason.isBlank()?"任务执行失败":reason,500);
+        jdbc.update("UPDATE agent_task SET status='FAILED',completed_at=? WHERE task_id=? AND status NOT IN ('SUCCEEDED','CANCELLED')",ts(now),taskId);
+        jdbc.update("DELETE FROM agent_task_lease WHERE task_id=?",taskId);
+        jdbc.update("UPDATE agent_task SET status='CANCELLED' WHERE plan_id=? AND task_id<>? AND status NOT IN ('SUCCEEDED','FAILED','CANCELLED')",row[0],taskId);
+        jdbc.update("UPDATE agent_plan SET status='FAILED',updated_at=? WHERE plan_id=?",ts(now),row[0]);
+        jdbc.update("UPDATE agent_run SET status='FAILED',completed_at=? WHERE run_id=?",ts(now),row[1]);
+        appendEvent(row[1],"task.failed",json(Map.of("taskKey",row[2],"reason",detail)),now);
+        appendEvent(row[1],"run.failed",json(Map.of("runId",row[1],"reason",detail)),now);
+    }
     @Override @Transactional public void markWaitingApproval(String taskId,String approvalId,Instant now){
         jdbc.update("UPDATE agent_task SET status='WAITING_APPROVAL' WHERE task_id=?",taskId);
         var run=jdbc.query("SELECT p.run_id,t.task_key FROM agent_task t JOIN agent_plan p ON p.plan_id=t.plan_id WHERE t.task_id=?",(rs,n)->new String[]{rs.getString(1),rs.getString(2)},taskId).stream().findFirst().orElse(null);

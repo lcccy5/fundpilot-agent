@@ -22,7 +22,7 @@ public class AuthController {
     private ResponseEntity<ApiResponse<AuthBody>> write(AuthSession session,HttpServletRequest request,HttpServletResponse response,HttpStatus status){setRefresh(response,session.refreshToken());return ResponseEntity.status(status).body(ApiResponse.success(RequestIdFilter.get(request),new AuthBody(session.accessToken(),session.accessTokenExpiresAt().toString(),session.user())));}
     private void setRefresh(HttpServletResponse response,String value){ResponseCookie cookie=ResponseCookie.from("fund_refresh",value).httpOnly(true).secure(refreshCookieSecure).sameSite("Lax").path("/api/v1/auth").maxAge(refreshTokenTtl).build();response.addHeader(HttpHeaders.SET_COOKIE,cookie.toString());}
     private void clear(HttpServletResponse response){response.addHeader(HttpHeaders.SET_COOKIE,ResponseCookie.from("fund_refresh","").httpOnly(true).secure(refreshCookieSecure).sameSite("Lax").path("/api/v1/auth").maxAge(Duration.ZERO).build().toString());}
-    public record RegisterBody(@NotBlank @Size(max=64) String username,@Size(max=80) String displayName,@NotBlank @Size(min=10,max=128) String password){}
+    public record RegisterBody(@NotBlank @Size(max=64) String username,@Size(max=80) String displayName,@NotBlank @Size(min=6,max=128) String password){}
     public record LoginBody(@NotBlank @Size(max=64) String username,@NotBlank @Size(max=128) String password){}
     public record AuthBody(String accessToken,String accessTokenExpiresAt,UserView user){}
 }
