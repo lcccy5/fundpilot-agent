@@ -26,11 +26,9 @@ class HybridRuntimeTest {
     private final AgentCoordinator coordinator=new AgentCoordinator(new ExecutionModeRouter(),dag);
     private final PlanTaskWorker worker=new PlanTaskWorker(dag);
 
-    @Test void simpleQuestionDoesNotCreatePlan(){
-        var run=coordinator.submit(new AgentRunCommand(null,"最大回撤是什么意思？","r1","user-a",true));
-        assertThat(run.executionMode()).isEqualTo("DIRECT");
-        assertThat(run.planId()).isNull();
-        assertThat(run.status()).isEqualTo("SUCCEEDED");
+    @Test void simpleQuestionIsRejectedByDurableRunBoundary(){
+        assertThatThrownBy(()->coordinator.submit(new AgentRunCommand(null,"最大回撤是什么意思？","r1","user-a",true)))
+                .hasMessageContaining("PLAN_AND_EXECUTE");
     }
 
     @Test void planExecutesDagAndIsolatesOwners(){

@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Duration;
+import com.jijing.fund.agent.exception.TaskLeaseLostException;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -103,7 +104,10 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
         jdbc.update("INSERT INTO agent_event(event_id,run_id,sequence,event_type,payload_json,created_at) VALUES(?,?,?,?,CAST(? AS JSON),?)",
                 UUID.randomUUID().toString(),runId,seq==null?1:seq,type,payloadJson==null?"{}":payloadJson,ts(now));
     }
+    /** Atomically claims a task and increments the retained fencing token using database time. */
     @Override @Transactional public Optional<ClaimedTask> claimReady(String workerId,Instant now,Duration lease){
+        if(lease.toMillis()<3)throw new IllegalArgumentException("lease must be at least 3ms");
+        now=databaseNow();
         var rows=jdbc.query("""
                 SELECT t.task_id,t.plan_id,p.run_id,p.owner_user_id,t.task_key,t.capability_type,CAST(t.input_json AS CHAR),t.input_hash,t.plan_version,t.attempts
                 FROM agent_task t
@@ -116,9 +120,11 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
                     JOIN agent_task dep ON dep.plan_id=d.plan_id AND dep.task_key=d.depends_on_task_key
                     WHERE d.plan_id=t.plan_id AND d.task_key=t.task_key AND dep.status<>'SUCCEEDED')
                 LIMIT 1 FOR UPDATE SKIP LOCKED
-                """,(rs,n)->new ClaimedTask(rs.getString(1),rs.getString(3),rs.getString(2),rs.getInt(9),rs.getString(5),rs.getString(6),rs.getString(7),rs.getString(8),rs.getInt(10)+1,rs.getString(4)),ts(now));
+                """,(rs,n)->new ClaimedTask(rs.getString(1),rs.getString(3),rs.getString(2),rs.getInt(9),rs.getString(5),rs.getString(6),rs.getString(7),rs.getString(8),rs.getInt(10)+1,rs.getString(4)),ts(databaseNow()));
         if(rows.isEmpty())return Optional.empty();
         ClaimedTask task=rows.getFirst();
+        if("RUNNING".equals(jdbc.queryForObject("SELECT status FROM agent_task WHERE task_id=?",String.class,task.taskId())))
+            appendEvent(task.runId(),"task.retrying",json(Map.of("taskKey",task.taskKey())),now);
         int updated=jdbc.update("UPDATE agent_task SET status='RUNNING',attempts=attempts+1,started_at=? WHERE task_id=? AND status IN ('READY','RUNNING')",ts(now),task.taskId());
         if(updated==0)return Optional.empty();
         jdbc.update("""
@@ -126,9 +132,13 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
                 VALUES(?,?,?,?,?,1) ON DUPLICATE KEY UPDATE owner_instance=VALUES(owner_instance),lease_until=VALUES(lease_until),heartbeat_at=VALUES(heartbeat_at),attempt=VALUES(attempt),version=version+1
                 """,task.taskId(),workerId,ts(now.plus(lease)),ts(now),task.attempt());
         appendEvent(task.runId(),"task.started","{\"taskKey\":\""+task.taskKey()+"\",\"attempt\":"+task.attempt()+"}",now);
-        return Optional.of(task);
+        long version=jdbc.queryForObject("SELECT version FROM agent_task_lease WHERE task_id=?",Long.class,task.taskId());
+        return Optional.of(new ClaimedTask(task.taskId(),task.runId(),task.planId(),task.planVersion(),task.taskKey(),task.capabilityType(),task.inputJson(),task.inputHash(),task.attempt(),task.ownerUserId(),workerId,version));
     }
-    @Override @Transactional public void completeTask(String taskId,String executionKey,String outputUri,List<String> evidenceIds,Instant now){
+    /** Commits output, idempotency record and events only while holding the current claim lock. */
+    @Override @Transactional public void completeTask(ClaimedTask claim,String executionKey,String outputUri,List<String> evidenceIds,Instant now){
+        String taskId=claim.taskId();
+        lockClaim(claim);
         var rows=jdbc.query("SELECT t.plan_id,p.run_id,t.task_key,t.status,p.owner_user_id,r.status FROM agent_task t JOIN agent_plan p ON p.plan_id=t.plan_id JOIN agent_run r ON r.run_id=p.run_id WHERE t.task_id=?",
                 (rs,n)->new Object[]{rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6)},taskId);
         if(rows.isEmpty())return;
@@ -140,7 +150,7 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
                 executionKey,owner,"TASK",executionKey,outputUri,ts(now));
         jdbc.update("UPDATE agent_task SET status='SUCCEEDED',output_uri=?,output_hash=?,evidence_ids_json=CAST(? AS JSON),completed_at=? WHERE task_id=?",
                 outputUri,sha(outputUri==null?"":outputUri),json(evidenceIds),ts(now),taskId);
-        jdbc.update("DELETE FROM agent_task_lease WHERE task_id=?",taskId);
+        // Keep the lease row so future claims cannot reuse a fencing token.
         appendEvent(runId,"task.completed","{\"taskKey\":\""+taskKey+"\",\"outputUri\":\""+outputUri+"\"}",now);
         if("REPORT_VERIFY".equals(capability(taskId)))appendEvent(runId,"verification.completed","{\"ok\":true}",now);
         if("REPORT_WRITE".equals(capability(taskId)))appendEvent(runId,"report.completed","{\"uri\":\""+outputUri+"\"}",now);
@@ -157,7 +167,9 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
      * Records a terminal task error and stops dependent work, because a report without this input
      * would be misleading. The reason is kept in owner-visible run events for diagnosis.
      */
-    @Override @Transactional public void failTask(String taskId,String reason,Instant now){
+    @Override @Transactional public void failTask(ClaimedTask claim,String reason,Instant now){
+        String taskId=claim.taskId();
+        lockClaim(claim);
         var rows=jdbc.query("SELECT t.plan_id,p.run_id,t.task_key,r.status FROM agent_task t JOIN agent_plan p ON p.plan_id=t.plan_id JOIN agent_run r ON r.run_id=p.run_id WHERE t.task_id=?",
                 (rs,n)->new String[]{rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4)},taskId);
         if(rows.isEmpty())return;
@@ -165,15 +177,20 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
         if("CANCELLED".equals(row[3]))return;
         String detail=truncate(reason==null||reason.isBlank()?"任务执行失败":reason,500);
         jdbc.update("UPDATE agent_task SET status='FAILED',completed_at=? WHERE task_id=? AND status NOT IN ('SUCCEEDED','CANCELLED')",ts(now),taskId);
-        jdbc.update("DELETE FROM agent_task_lease WHERE task_id=?",taskId);
+        // Keep the lease row so future claims cannot reuse a fencing token.
         jdbc.update("UPDATE agent_task SET status='CANCELLED' WHERE plan_id=? AND task_id<>? AND status NOT IN ('SUCCEEDED','FAILED','CANCELLED')",row[0],taskId);
         jdbc.update("UPDATE agent_plan SET status='FAILED',updated_at=? WHERE plan_id=?",ts(now),row[0]);
         jdbc.update("UPDATE agent_run SET status='FAILED',completed_at=? WHERE run_id=?",ts(now),row[1]);
         appendEvent(row[1],"task.failed",json(Map.of("taskKey",row[2],"reason",detail)),now);
         appendEvent(row[1],"run.failed",json(Map.of("runId",row[1],"reason",detail)),now);
     }
-    @Override @Transactional public void markWaitingApproval(String taskId,String approvalId,Instant now){
+    /** Releases execution while atomically persisting the fenced approval transition. */
+    @Override @Transactional public void markWaitingApproval(ClaimedTask claim,String approvalId,Instant now){
+        String taskId=claim.taskId();
+        lockClaim(claim);
         jdbc.update("UPDATE agent_task SET status='WAITING_APPROVAL' WHERE task_id=?",taskId);
+        // Release the deadline for immediate re-claim after approval, retaining the generation.
+        jdbc.update("UPDATE agent_task_lease SET lease_until=? WHERE task_id=?",ts(databaseNow()),taskId);
         var run=jdbc.query("SELECT p.run_id,t.task_key FROM agent_task t JOIN agent_plan p ON p.plan_id=t.plan_id WHERE t.task_id=?",(rs,n)->new String[]{rs.getString(1),rs.getString(2)},taskId).stream().findFirst().orElse(null);
         if(run==null)return;
         jdbc.update("UPDATE agent_run SET status='WAITING_APPROVAL' WHERE run_id=?",run[0]);
@@ -216,11 +233,13 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
         jdbc.update("UPDATE agent_run SET status='CANCELLED' WHERE run_id=?",ids[0]);
         appendEvent(ids[0],"approval.resolved","{\"approvalId\":\""+approvalId+"\",\"status\":\"REJECTED\"}",now);
     }
+    /** Locks expired claims against heartbeat/takeover and preserves their generation history. */
     @Override @Transactional public int recoverExpiredLeases(Instant now){
-        var expired=jdbc.query("SELECT t.task_id,p.run_id,t.task_key,t.plan_id FROM agent_task t JOIN agent_task_lease l ON l.task_id=t.task_id JOIN agent_plan p ON p.plan_id=t.plan_id WHERE t.status='RUNNING' AND l.lease_until<=?",(rs,n)->new String[]{rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4)},ts(now));
+        now=databaseNow();
+        var expired=jdbc.query("SELECT t.task_id,p.run_id,t.task_key,t.plan_id FROM agent_task t JOIN agent_task_lease l ON l.task_id=t.task_id JOIN agent_plan p ON p.plan_id=t.plan_id WHERE t.status='RUNNING' AND l.lease_until<=? FOR UPDATE SKIP LOCKED",(rs,n)->new String[]{rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4)},ts(now));
         for(String[] row:expired){
             jdbc.update("UPDATE agent_task SET status='READY' WHERE task_id=? AND status='RUNNING'",row[0]);
-            jdbc.update("DELETE FROM agent_task_lease WHERE task_id=?",row[0]);
+            // Preserve version history across recovery.
             appendEvent(row[1],"task.retrying","{\"taskKey\":\""+row[2]+"\"}",now);
             unlockReady(row[3]);
         }
@@ -237,6 +256,31 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
     @Override public boolean isSideEffectAuthorized(String taskId){
         Integer n=jdbc.queryForObject("SELECT COUNT(*) FROM agent_approval WHERE task_id=? AND status='APPROVED' AND used_at IS NOT NULL",Integer.class,taskId);
         return n!=null&&n>0;
+    }
+
+    /** Uses the database clock so worker clock skew cannot revive an expired claim. */
+    private Instant databaseNow(){return jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)",Timestamp.class).toInstant();}
+
+    /** Locks task and lease until transaction commit; checks time after lock acquisition. */
+    private void lockClaim(ClaimedTask claim){
+        var rows=jdbc.query("SELECT t.status,l.owner_instance,l.version,l.lease_until FROM agent_task t JOIN agent_task_lease l ON l.task_id=t.task_id WHERE t.task_id=? FOR UPDATE",
+                (rs,n)->new Object[]{rs.getString(1),rs.getString(2),rs.getLong(3),rs.getTimestamp(4).toInstant()},claim.taskId());
+        if(rows.isEmpty())throw new TaskLeaseLostException(claim.taskId());
+        Object[] row=rows.getFirst();
+        if(!"RUNNING".equals(row[0])||!Objects.equals(claim.workerId(),row[1])||claim.leaseVersion()!=(Long)row[2]||!databaseNow().isBefore((Instant)row[3]))
+            throw new TaskLeaseLostException(claim.taskId());
+    }
+
+    /** Serializes checkpoint/event writes with takeover in the same Spring transaction. */
+    @Override @Transactional public void withLease(ClaimedTask claim,Instant now,Runnable writes){lockClaim(claim);writes.run();}
+
+    /** Extends a still-valid generation; failed renewal never revives an expired lease. */
+    @Override @Transactional public boolean renewLease(ClaimedTask claim,Instant now,Duration lease){
+        if(lease.toMillis()<3)throw new IllegalArgumentException("lease must be at least 3ms");
+        try{lockClaim(claim);}catch(TaskLeaseLostException lost){return false;}
+        Instant current=databaseNow();
+        return jdbc.update("UPDATE agent_task_lease SET lease_until=?,heartbeat_at=? WHERE task_id=? AND owner_instance=? AND version=? AND lease_until>?",
+                ts(current.plus(lease)),ts(current),claim.taskId(),claim.workerId(),claim.leaseVersion(),ts(current))==1;
     }
 
     private void unlockReady(String planId){

@@ -39,10 +39,11 @@ public class SpringAiFundAgentService implements FundAgentUseCase,AutoCloseable 
      */
     public SpringAiFundAgentService(ChatModel model,ChatMemory memory,AgentRuntimeRepository repository,
             FundAgentProperties properties,FundToolRouter router,ObjectMapper mapper,Clock clock,
-            FundAgentSafetyPolicy safetyPolicy,FundAgentCitationPolicy citationPolicy,MeterRegistry meters,FundAgentPromptResolver promptResolver,AgentModelDescriptor modelDescriptor){
+            FundAgentSafetyPolicy safetyPolicy,FundAgentCitationPolicy citationPolicy,MeterRegistry meters,FundAgentPromptResolver promptResolver,AgentModelDescriptor modelDescriptor,
+            ExecutionModeRouter modeRouter,AgentRunUseCase asyncRuns){
         this.repository=repository;this.properties=properties;this.router=router;this.mapper=mapper;this.clock=clock;
         this.safetyPolicy=safetyPolicy;this.citationPolicy=citationPolicy;this.meters=meters;this.promptResolver=promptResolver;this.modelDescriptor=modelDescriptor;
-        this.modeRouter=null;this.asyncRuns=null;this.chatClient=ChatClient.builder(model).defaultAdvisors(MessageChatMemoryAdvisor.builder(memory).build()).build();
+        this.modeRouter=modeRouter;this.asyncRuns=asyncRuns;this.chatClient=ChatClient.builder(model).defaultAdvisors(MessageChatMemoryAdvisor.builder(memory).build()).build();
     }
     /**
      * 为传入固定本地提示词的组件测试保留的兼容构造器。
@@ -169,10 +170,12 @@ public class SpringAiFundAgentService implements FundAgentUseCase,AutoCloseable 
     /** 执行该 Agent 运行时组件中的 routePlanIfNeeded 操作。 */
     private FundAgentResponse routePlanIfNeeded(FundAgentRequest request,ResolvedFundAgentPrompt prompt){
         if(modeRouter==null||asyncRuns==null||request.actor()==null)return null;
-        if(modeRouter.route(request.message(),true).mode()!=ExecutionMode.PLAN_AND_EXECUTE)return null;
-        var view=asyncRuns.submit(new AgentRunCommand(request.conversationId(),request.message(),request.requestId(),request.actor().userId().value(),true));
+        var decision=modeRouter.route(request.message(),true);
+        meters.counter("fund.agent.routes","mode",decision.mode().name(),"rule",decision.matchedRule()).increment();
+        if(decision.mode()!=ExecutionMode.PLAN_AND_EXECUTE)return null;
+        var view=asyncRuns.submit(new AgentRunCommand(request.conversationId(),request.message(),request.requestId(),request.actor().userId().value(),true,decision));
         Instant completed=clock.instant();
-        String answer="已创建异步研究任务 "+view.runId()+"（"+view.executionMode()+"）。普通问答保持单 Agent，不会启动多 Agent。";
+        String answer="已创建异步研究任务 "+view.runId()+"（"+view.executionMode()+"）。普通问答使用有限 ReAct，复杂任务由持久化 DAG 执行。";
         return new FundAgentResponse(request.conversationId(),view.runId(),answer,List.of(),List.of("长任务走 Plan-and-Execute，请在研究任务页查看 DAG。"),prompt.version(),modelDescriptor.provider(),modelDescriptor.configuredModel(),TokenUsage.empty(),completed);
     }
     

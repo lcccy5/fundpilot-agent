@@ -28,7 +28,7 @@ class MultiAgentAndOutboxTest {
         var supervisor=new MultiAgentSupervisor(new ExecutionModeRouter(),new PlanValidator(),new RuleBasedPlanner());
         var decision=supervisor.decide("最大回撤是什么意思？",true,true);
         assertThat(decision.multiAgent()).isFalse();
-        assertThat(decision.route().mode()).isEqualTo(ExecutionMode.DIRECT);
+        assertThat(decision.route().mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
     }
 
     @Test void dataResearcherCannotReadPortfolio(){
@@ -157,7 +157,7 @@ class MultiAgentAndOutboxTest {
         var report=new MultiAgentAbEval().evaluate(MultiAgentAbEval.defaultDataset());
         assertThat(report.ordinaryQaMultiStarts()).isZero();
         assertThat(report.enableMultiAgent()).isFalse();
-        assertThat(report.cases()).anyMatch(c->"DIRECT".equals(c.routedMode())&&"qa".equals(c.kind()));
+        assertThat(report.cases()).anyMatch(c->"BOUNDED_REACT".equals(c.routedMode())&&"qa".equals(c.kind()));
         assertThat(report.cases()).anyMatch(c->"PLAN_AND_EXECUTE".equals(c.routedMode())&&c.multiAgentStarted());
         var dir=java.nio.file.Path.of(System.getProperty("user.dir"));
         if(dir.endsWith("fund-agent-runtime"))dir=dir.getParent();

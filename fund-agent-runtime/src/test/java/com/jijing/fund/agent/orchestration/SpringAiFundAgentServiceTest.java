@@ -54,7 +54,7 @@ class SpringAiFundAgentServiceTest {
             assertThat(response.answer()).contains("ev-old");assertThat(response.evidence()).contains(evidence);verify(repository).recordFactCardUsage("run-fact",List.of("card-1"),now);
         }
     }
-    @Test void chatDoesNotStartMultiAgentForComplexPlan(){
+    @Test void chatRoutesComplexRequestToDurablePlan(){
         String conversation="00000000-0000-0000-0000-000000000004";
         AgentRuntimeRepository repository=mock(AgentRuntimeRepository.class);when(repository.conversationExists(eq(conversation),any())).thenReturn(true);
         FundToolRouter router=mock(FundToolRouter.class);when(router.toolsFor(anyString())).thenReturn(new Object[]{});
@@ -68,7 +68,7 @@ class SpringAiFundAgentServiceTest {
         try(var service=new SpringAiFundAgentService(model,memory,repository,properties,router,new ObjectMapper().findAndRegisterModules(),Clock.systemUTC(),new FundAgentSafetyPolicy(),new FundAgentCitationPolicy(),new SimpleMeterRegistry(),prompt,new AgentModelDescriptor("test","fake"),new com.jijing.fund.agent.routing.ExecutionModeRouter(),runs)){
             FundAgentResponse response=service.chat(new FundAgentRequest(conversation,"比较 000001 110022 161725 并结合我的组合生成报告","req-plan",actor));
             assertThat(response.runId()).isEqualTo("plan-run");
-            assertThat(response.answer()).contains("不会启动多 Agent");
+            assertThat(response.answer()).contains("普通问答使用有限 ReAct");
             verify(runs).submit(any());
             verify(repository,never()).startRun(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any());
         }

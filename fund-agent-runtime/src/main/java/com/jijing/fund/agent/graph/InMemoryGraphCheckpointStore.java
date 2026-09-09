@@ -20,12 +20,24 @@ public final class InMemoryGraphCheckpointStore implements GraphCheckpointStore 
         values.add(checkpoint);
     }
 
+    /** Updates an existing checkpoint without changing its sequence in local and test runs. */
+    @Override public void replace(GraphCheckpoint checkpoint) {
+        int index = values.indexOf(values.stream().filter(value -> value.checkpointId().equals(checkpoint.checkpointId())).findFirst()
+                .orElseThrow(() -> new IllegalStateException("checkpoint does not exist")));
+        values.set(index, checkpoint);
+    }
+
+    /** Supplies oldest-to-newest history because LangGraph4j restores by checkpoint id or latest step. */
+    @Override public List<GraphCheckpoint> findAll(String runId, String taskId, String graphName, String graphVersion) {
+        return values.stream().filter(value -> value.runId().equals(runId) && value.taskId().equals(taskId)
+                        && value.graphName().equals(graphName) && value.graphVersion().equals(graphVersion))
+                .sorted(Comparator.comparingLong(GraphCheckpoint::sequence)).toList();
+    }
+
     /** Selects the newest snapshot that was created by the requested graph version. */
     @Override 
     /** 获取当前 Agent 操作所需的 findLatest 结果。 */
     public Optional<GraphCheckpoint> findLatest(String runId, String taskId, String graphName, String graphVersion) {
-        return values.stream().filter(value -> value.runId().equals(runId) && value.taskId().equals(taskId)
-                        && value.graphName().equals(graphName) && value.graphVersion().equals(graphVersion))
-                .max(Comparator.comparingLong(GraphCheckpoint::sequence));
+        return findAll(runId, taskId, graphName, graphVersion).stream().max(Comparator.comparingLong(GraphCheckpoint::sequence));
     }
 }

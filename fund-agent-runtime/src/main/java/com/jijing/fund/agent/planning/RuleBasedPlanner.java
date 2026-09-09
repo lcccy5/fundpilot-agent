@@ -23,6 +23,8 @@ public final class RuleBasedPlanner {
         String text=message==null?"":message;
         List<String> funds=FUND.matcher(text).results().map(m->m.group()).distinct().toList();
         if(text.contains("催化")) return catalystDraft(text,funds);
+        if(text.contains("归因")||text.contains("下跌原因")||(text.contains("为什么")&&text.contains("下跌")))
+            return declineAttributionDraft(text,funds);
         if(funds.isEmpty())funds=List.of("000001","110022","161725");
         boolean personal=text.contains("组合")||text.contains("我的");
         boolean export=text.contains("导出")||text.contains("发布")||text.contains("通知");
@@ -55,5 +57,17 @@ public final class RuleBasedPlanner {
         input.put("lookbackDays",45);
         return new PlanDraft(text,Map.of("fundCodes",funds,"researchType","CATALYST"),Map.of("maxTasks",1,"maxToolCalls",8),
                 List.of(new PlanTaskDraft("catalyst-research","CATALYST_RESEARCH",Map.copyOf(input),List.of(),List.of("CATALYST_RESEARCH"))));
+    }
+
+    /** Builds one adaptive investigation task; its internal branches are owned by LangGraph4j. */
+    private PlanDraft declineAttributionDraft(String text,List<String> funds){
+        Map<String,Object> input=new LinkedHashMap<>();
+        if(!funds.isEmpty())input.put("fundCode",funds.getFirst());
+        else input.put("theme",text);
+        input.put("lookbackDays",45);
+        return new PlanDraft(text,Map.of("fundCodes",funds,"researchType","DECLINE_ATTRIBUTION"),
+                Map.of("maxTasks",1,"maxToolCalls",8),
+                List.of(new PlanTaskDraft("decline-attribution","DECLINE_ATTRIBUTION",Map.copyOf(input),
+                        List.of(),List.of("DECLINE_ATTRIBUTION"))));
     }
 }

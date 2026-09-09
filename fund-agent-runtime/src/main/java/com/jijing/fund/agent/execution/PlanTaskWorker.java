@@ -27,38 +27,73 @@ public final class PlanTaskWorker {
 
     
     /**
-     * Claims one ready task, persists successful output, and converts execution exceptions
-     * into a terminal task failure so scheduled workers do not repeatedly re-run bad input.
+     * Executes on an interruptible virtual thread while this thread renews the lease.
+     * Losing or being unable to confirm ownership cancels execution without publishing a failure.
      */
     public Optional<String> claimAndExecute(String workerId,Instant now,Duration lease){
-        Optional<ClaimedTask> claimed=dag.claimReady(workerId,now,lease);
+        if(lease.toMillis()<3)throw new IllegalArgumentException("lease must be at least 3ms");
+        long started=System.nanoTime();
+        java.util.function.Supplier<Instant> current=()->now.plusNanos(System.nanoTime()-started);
+        Optional<ClaimedTask> claimed=dag.claimReady(workerId,current.get(),lease);
         if(claimed.isEmpty())return Optional.empty();
         ClaimedTask task=claimed.get();
-        if(AgentCapabilityRegistry.APPROVAL_REQUIRED.contains(task.capabilityType())&&!dag.isSideEffectAuthorized(task.taskId())){
-            String hash=sha(task.inputJson());
-            String approvalId=dag.requestApproval(task.runId(),task.taskId(),task.ownerUserId(),task.capabilityType(),hash,"export requires approval",Instant.now().plus(Duration.ofHours(1)),now);
-            dag.markWaitingApproval(task.taskId(),approvalId,now);
-            return Optional.of(task.taskId());
-        }
-        String key=executionKey(task);
-        if(dag.alreadySucceeded(key)){
-            dag.completeTask(task.taskId(),key,"artifact://reused/"+key,List.of("ev-reuse"),now);
-            return Optional.of(task.taskId());
-        }
+        var active=new java.util.concurrent.atomic.AtomicBoolean(true);
+        Runnable check=()->{
+            if(!active.get()||Thread.currentThread().isInterrupted())throw new com.jijing.fund.agent.exception.TaskLeaseLostException(task.taskId());
+            // Also consult durable ownership before each new capability/graph operation.
+            dag.withLease(task,current.get(),()->{});
+        };
+        var context=new CapabilityExecutionContext(task,check,writes->{check.run();dag.withLease(task,current.get(),writes);});
+        var future=new java.util.concurrent.FutureTask<Void>(()->{
+            check.run();
+            if(AgentCapabilityRegistry.APPROVAL_REQUIRED.contains(task.capabilityType())&&!dag.isSideEffectAuthorized(task.taskId())){
+                context.persist(()->{
+                    String approvalId=dag.requestApproval(task.runId(),task.taskId(),task.ownerUserId(),task.capabilityType(),sha(task.inputJson()),"export requires approval",Instant.now().plus(Duration.ofHours(1)),current.get());
+                    dag.markWaitingApproval(task,approvalId,current.get());
+                });
+                return null;
+            }
+            String key=executionKey(task);
+            try{
+                if(dag.alreadySucceeded(key)){
+                    dag.completeTask(task,key,"artifact://reused/"+key,List.of("ev-reuse"),current.get());
+                }else{
+                    check.run();
+                    var result=executors.require(task.capabilityType()).execute(context);
+                    check.run();
+                    dag.completeTask(task,key,result.outputUri(),result.evidenceIds(),current.get());
+                }
+            }catch(com.jijing.fund.agent.exception.TaskLeaseLostException lost){throw lost;}
+            catch(RuntimeException error){
+                check.run();
+                String reason=error.getMessage()==null?error.getClass().getSimpleName():error.getMessage();
+                dag.failTask(task,reason,current.get());
+            }
+            return null;
+        });
+        Thread.ofVirtual().name("plan-task-"+task.taskId()).start(future);
         try{
-            var result=executors.require(task.capabilityType()).execute(new CapabilityExecutionContext(task));
-            dag.completeTask(task.taskId(),key,result.outputUri(),result.evidenceIds(),now);
-        }catch(RuntimeException error){
-            String reason=error.getMessage()==null?error.getClass().getSimpleName():error.getMessage();
-            dag.failTask(task.taskId(),reason,now);
+            while(true){
+                try{future.get(Math.max(1,lease.toMillis()/3),java.util.concurrent.TimeUnit.MILLISECONDS);break;}
+                catch(java.util.concurrent.TimeoutException timeout){
+                    if(!dag.renewLease(task,current.get(),lease))break;
+                }
+            }
+        }catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+        catch(java.util.concurrent.ExecutionException failure){
+            if(!(failure.getCause() instanceof com.jijing.fund.agent.exception.TaskLeaseLostException))
+                throw new IllegalStateException("task execution could not be persisted",failure.getCause());
+        }finally{
+            active.set(false);
+            future.cancel(true);
         }
         return Optional.of(task.taskId());
     }
 
-    
     /** 执行该 Agent 运行时组件中的 drain 操作。 */
     public int drain(String workerId,Instant now,Duration lease,int max){
-        int n=0;while(n<max&&claimAndExecute(workerId,now,lease).isPresent())n++;return n;
+        long started=System.nanoTime();
+        int n=0;while(n<max&&!Thread.currentThread().isInterrupted()&&claimAndExecute(workerId,now.plusNanos(System.nanoTime()-started),lease).isPresent())n++;return n;
     }
 
     

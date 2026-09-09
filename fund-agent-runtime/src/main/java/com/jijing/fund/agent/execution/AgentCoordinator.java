@@ -40,17 +40,17 @@ public final class AgentCoordinator implements AgentRunUseCase {
     public AgentRunView submit(AgentRunCommand command){
         if(command==null||command.message()==null||command.message().isBlank()||command.ownerUserId()==null)throw new AgentInvalidArgumentException("message and owner are required");
         Instant now=Instant.now();
-        RouteDecision decision=router.route(command.message(),command.hasPermission());
+        if(!command.hasPermission())router.route(command.message(),false);
+        RouteDecision decision=command.routeDecision()==null
+                ?router.route(command.message(),command.hasPermission()):command.routeDecision();
+        if(decision.mode()!=ExecutionMode.PLAN_AND_EXECUTE)
+            throw new AgentInvalidArgumentException("durable runs require PLAN_AND_EXECUTE routing");
         String conversationId=command.conversationId()==null||command.conversationId().isBlank()?dag.createConversation(command.ownerUserId(),now):command.conversationId();
         String runId=dag.startRun(conversationId,command.ownerUserId(),command.requestId(),decision.mode().name(),decision.matchedRule(),now);
         dag.saveRoute(runId,command.ownerUserId(),decision,now);
-        if(decision.mode()==ExecutionMode.PLAN_AND_EXECUTE){
-            PlanDraft draft=planner.draft(command.message());
-            validator.validate(draft,command.ownerUserId());
-            dag.saveValidatedPlan(runId,command.ownerUserId(),draft,now);
-        }else{
-            dag.markRunSucceeded(runId,now);
-        }
+        PlanDraft draft=planner.draft(command.message());
+        validator.validate(draft,command.ownerUserId());
+        dag.saveValidatedPlan(runId,command.ownerUserId(),draft,now);
         return dag.requireOwnedRun(runId,command.ownerUserId());
     }
     @Override 

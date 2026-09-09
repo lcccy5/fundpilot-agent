@@ -65,11 +65,11 @@ fund:
       model: ${AI_CHAT_MODEL:}
     prompt-version: fund-agent-v1
     tool-schema-version: fund-tools-v3
-    max-tool-calls-per-run: 6
+    max-tool-calls-per-run: 4
     max-repeated-identical-tool-call: 1
     max-model-rounds: 5
-    run-timeout: 30s
-    tool-timeout: 5s
+    run-timeout: 60s
+    tool-timeout: 15s
     max-user-message-chars: 2000
     max-conversation-messages: 20
     max-conversation-tokens: 8000

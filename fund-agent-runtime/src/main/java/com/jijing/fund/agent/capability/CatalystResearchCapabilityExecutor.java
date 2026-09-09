@@ -2,8 +2,8 @@ package com.jijing.fund.agent.capability;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jijing.fund.agent.port.AgentToolCallRecord;
-import com.jijing.fund.agent.graph.GraphCheckpoint;
 import com.jijing.fund.agent.graph.GraphCheckpointStore;
+import com.jijing.fund.agent.graph.DurableGraphCheckpointSaver;
 import com.jijing.fund.agent.graph.ResumableCatalystResearchGraph;
 import com.jijing.fund.agent.orchestration.AgentExecutionTrace;
 import com.jijing.fund.agent.port.AgentDagRepository;
@@ -12,11 +12,8 @@ import com.jijing.fund.agent.tool.FundCatalystResearchTool;
 import com.jijing.fund.agent.tool.ToolResultStatus;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.ai.chat.model.ToolContext;
 
 /**
@@ -52,22 +49,22 @@ public final class CatalystResearchCapabilityExecutor implements AgentCapability
     @Override 
     /** 执行 execute 操作，并应用相应的 Agent 运行时状态变化。 */
     public CapabilityExecutionResult execute(CapabilityExecutionContext context) {
+        context.checkActive();
         var task = context.task();
         Map<String, Object> input = CapabilityJson.input(mapper, task.inputJson());
         var request = new ResumableCatalystResearchGraph.Request(optional(input, "fundCode"), optional(input, "theme"), integer(input, "lookbackDays", 45));
-        Optional<GraphCheckpoint> latest = checkpoints.findLatest(task.runId(), task.taskId(), ResumableCatalystResearchGraph.NAME, ResumableCatalystResearchGraph.VERSION);
-        var resume = latest.flatMap(this::resume).orElse(null);
-        AtomicLong sequence = new AtomicLong(latest.map(GraphCheckpoint::sequence).orElse(0L));
-        dag.appendEvent(task.runId(), "graph.started", json(Map.of("taskKey", task.taskKey(), "graph", ResumableCatalystResearchGraph.NAME, "resumed", resume != null)), Instant.now());
+        var saver = new DurableGraphCheckpointSaver(task.runId(), task.taskId(), ResumableCatalystResearchGraph.NAME,
+                ResumableCatalystResearchGraph.VERSION, checkpoints, context, dag, mapper);
+        boolean resumed = saver.get(org.bsc.langgraph4j.RunnableConfig.builder().threadId(task.taskId()).build()).isPresent();
+        context.persist(() -> dag.appendEvent(task.runId(), "graph.started", json(Map.of("taskKey", task.taskKey(), "graph", ResumableCatalystResearchGraph.NAME, "resumed", resumed)), Instant.now()));
 
-        AgentExecutionTrace trace = new AgentExecutionTrace(task.runId(), new TaskTraceRepository(dag, mapper), mapper, 8, 2, Duration.ofSeconds(15));
+        AgentExecutionTrace trace = new AgentExecutionTrace(task.runId(), new TaskTraceRepository(dag, mapper, context), mapper, 8, 2, Duration.ofSeconds(15));
         var graph = new ResumableCatalystResearchGraph(
-                (graphRequest, attempt) -> research(graphRequest, attempt, trace),
-                (draft, evidence) -> review(draft, evidence),
-                (node, previous, update) -> checkpoint(task, sequence.incrementAndGet(), node, previous, update));
-        var result = graph.invoke(request, resume);
+                (graphRequest, attempt) -> { context.checkActive(); return research(graphRequest, attempt, trace); },
+                (draft, evidence) -> { context.checkActive(); return review(draft, evidence); });
+        var result = graph.invoke(request, saver, task.taskId());
         Map<String, Object> artifact = Map.of("summary", result.summary(), "evidenceIds", result.evidenceIds(), "attempts", result.attempts(), "graph", ResumableCatalystResearchGraph.NAME, "graphVersion", ResumableCatalystResearchGraph.VERSION);
-        dag.appendEvent(task.runId(), "graph.completed", json(Map.of("taskKey", task.taskKey(), "evidenceCount", result.evidenceIds().size(), "attempts", result.attempts())), Instant.now());
+        context.persist(() -> dag.appendEvent(task.runId(), "graph.completed", json(Map.of("taskKey", task.taskKey(), "evidenceCount", result.evidenceIds().size(), "attempts", result.attempts())), Instant.now()));
         return new CapabilityExecutionResult(CapabilityJson.artifactUri(mapper, context, artifact), result.evidenceIds());
     }
 
@@ -86,27 +83,6 @@ public final class CatalystResearchCapabilityExecutor implements AgentCapability
     /** Builds a bounded, citation-preserving reviewer output without introducing an ungrounded second tool call. */
     private String review(String draft, List<String> evidenceIds) {
         return "催化剂研究已完成；以下结论仅基于已验证证据 " + String.join(",", evidenceIds) + "。\n" + draft;
-    }
-
-    /** Persists merged post-node state before publishing the matching event, so recovery never claims unpersisted progress. */
-    private void checkpoint(com.jijing.fund.agent.port.AgentDagRepository.ClaimedTask task, long sequence, String node,
-                            Map<String, Object> previous, Map<String, Object> update) {
-        Map<String, Object> state = new LinkedHashMap<>(previous);
-        state.putAll(update);
-        String phase = String.valueOf(state.getOrDefault("phase", "NEW"));
-        checkpoints.append(new GraphCheckpoint(task.runId(), task.taskId(), ResumableCatalystResearchGraph.NAME,
-                ResumableCatalystResearchGraph.VERSION, sequence, node, phase, state, Instant.now()));
-        dag.appendEvent(task.runId(), "graph.node.completed", json(Map.of("taskKey", task.taskKey(), "node", node, "phase", phase, "sequence", sequence)), Instant.now());
-    }
-
-    /** Converts a persisted generic state map into the minimal resume contract, ignoring incompatible phases. */
-    private Optional<ResumableCatalystResearchGraph.ResumeState> resume(GraphCheckpoint checkpoint) {
-        if (!"RESEARCH_READY".equals(checkpoint.phase())) return Optional.empty();
-        Map<String, Object> state = checkpoint.state();
-        Object evidence = state.get("evidenceIds");
-        List<String> evidenceIds = evidence instanceof List<?> values ? values.stream().map(String::valueOf).toList() : List.of();
-        return Optional.of(new ResumableCatalystResearchGraph.ResumeState(integer(state, "attempt", 0), String.valueOf(state.getOrDefault("draft", "")), evidenceIds,
-                Boolean.TRUE.equals(state.get("retryable")), checkpoint.phase()));
     }
 
     /** Reads an optional string without allowing the model to substitute a missing value with the literal "null". */
@@ -133,8 +109,10 @@ public final class CatalystResearchCapabilityExecutor implements AgentCapability
     private static final class TaskTraceRepository implements AgentRuntimeRepository {
         private final AgentDagRepository dag;
         private final ObjectMapper mapper;
+        /** Lease guard shared with the graph executor. */
+        private final CapabilityExecutionContext context;
         /** Stores the outer DAG repository and its canonical JSON serializer. */
-        private TaskTraceRepository(AgentDagRepository dag, ObjectMapper mapper) { this.dag = dag; this.mapper = mapper; }
+        private TaskTraceRepository(AgentDagRepository dag, ObjectMapper mapper, CapabilityExecutionContext context) { this.dag = dag; this.mapper = mapper; this.context=context; }
         /** Unsupported because a plan task already owns its conversation lifecycle in AgentDagRepository. */
         @Override 
         /** 创建并初始化当前 Agent 操作所需的 createConversation 结果。 */
@@ -159,7 +137,8 @@ public final class CatalystResearchCapabilityExecutor implements AgentCapability
         @Override 
         /** 通过 recordToolCall 操作更新持久化或内存中的运行状态。 */
         public void recordToolCall(AgentToolCallRecord record) {
-            try { dag.appendEvent(record.runId(), "graph.tool." + record.resultStatus().toLowerCase(), mapper.writeValueAsString(Map.of("toolName", record.toolName(), "evidenceIds", record.evidenceIds(), "errorCode", record.errorCode())), Instant.now()); }
+            try { String payload=mapper.writeValueAsString(Map.of("toolName", record.toolName(), "evidenceIds", record.evidenceIds(), "errorCode", record.errorCode()));
+                context.persist(() -> dag.appendEvent(record.runId(), "graph.tool." + record.resultStatus().toLowerCase(), payload, Instant.now())); }
             catch (Exception error) { throw new IllegalStateException("cannot publish graph tool event", error); }
         }
     }

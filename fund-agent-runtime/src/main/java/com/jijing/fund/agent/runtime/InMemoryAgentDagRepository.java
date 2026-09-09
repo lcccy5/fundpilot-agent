@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import com.jijing.fund.agent.exception.TaskLeaseLostException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -94,25 +95,29 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
     @Override 
     /** 通过 claimReady 操作更新持久化或内存中的运行状态。 */
     public Optional<ClaimedTask> claimReady(String workerId,Instant now,Duration lease){
+        if(lease.toMillis()<3)throw new IllegalArgumentException("lease must be at least 3ms");
         synchronized(lock){
             for(TaskState task:tasks.values()){
                 RunState run=runs.get(task.runId);
                 if(run==null||"CANCELLED".equals(run.status)||"CANCELLED".equals(task.status))continue;
                 refreshReady(task);
-                if(!"READY".equals(task.status))continue;
+                if(!"READY".equals(task.status)&&!"RUNNING".equals(task.status))continue;
                 if(task.leaseUntil!=null&&now.isBefore(task.leaseUntil))continue;
+                if("RUNNING".equals(task.status))appendUnlocked(run,"task.retrying",toJson(Map.of("taskKey",task.taskKey)),now);
                 task.status="RUNNING";task.attempts++;task.leaseOwner=workerId;task.leaseUntil=now.plus(lease);task.leaseVersion++;
                 appendUnlocked(run,"task.started","{\"taskKey\":\""+task.taskKey+"\",\"attempt\":"+task.attempts+"}",now);
-                return Optional.of(new ClaimedTask(task.taskId,task.runId,task.planId,task.planVersion,task.taskKey,task.capabilityType,task.inputJson,task.inputHash,task.attempts,run.ownerUserId));
+                return Optional.of(new ClaimedTask(task.taskId,task.runId,task.planId,task.planVersion,task.taskKey,task.capabilityType,task.inputJson,task.inputHash,task.attempts,run.ownerUserId,workerId,task.leaseVersion));
             }
             return Optional.empty();
         }
     }
 
     @Override 
-    /** 通过 completeTask 操作更新持久化或内存中的运行状态。 */
-    public void completeTask(String taskId,String executionKey,String outputUri,List<String> evidenceIds,Instant now){
+    /** Writes output and success deduplication atomically after validating the current generation. */
+    public void completeTask(ClaimedTask claim,String executionKey,String outputUri,List<String> evidenceIds,Instant now){
+        String taskId=claim.taskId();
         synchronized(lock){
+            requireClaim(claim,now);
             TaskState task=tasks.get(taskId);if(task==null)return;
             RunState run=runs.get(task.runId);if(run==null||"CANCELLED".equals(run.status)){task.status="CANCELLED";return;}
             if("SUCCEEDED".equals(task.status))return;
@@ -131,8 +136,10 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
      * Makes a task failure terminal and cancels dependent work that cannot produce a valid report.
      * The failure reason is published as an event for the owner-facing progress screen.
      */
-    @Override public void failTask(String taskId,String reason,Instant now){
+    @Override public void failTask(ClaimedTask claim,String reason,Instant now){
+        String taskId=claim.taskId();
         synchronized(lock){
+            requireClaim(claim,now);
             TaskState task=tasks.get(taskId);if(task==null)return;
             RunState run=runs.get(task.runId);if(run==null||"CANCELLED".equals(run.status))return;
             task.status="FAILED";task.leaseUntil=null;
@@ -145,9 +152,11 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
     }
 
     @Override 
-    /** 通过 markWaitingApproval 操作更新持久化或内存中的运行状态。 */
-    public void markWaitingApproval(String taskId,String approvalId,Instant now){
+    /** Checks the generation before releasing the lease for approval. */
+    public void markWaitingApproval(ClaimedTask claim,String approvalId,Instant now){
+        String taskId=claim.taskId();
         synchronized(lock){
+            requireClaim(claim,now);
             TaskState task=tasks.get(taskId);if(task==null)return;
             task.status="WAITING_APPROVAL";task.leaseUntil=null;
             RunState run=runs.get(task.runId);run.status="WAITING_APPROVAL";
@@ -240,7 +249,23 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
     }
 
     
-    /** 通过 refreshReady 操作更新持久化或内存中的运行状态。 */
+    /** Validates under the repository monitor, shared with claim and recovery. */
+    private void requireClaim(ClaimedTask claim,Instant now){
+        TaskState task=tasks.get(claim.taskId());
+        if(task==null||!"RUNNING".equals(task.status)||!Objects.equals(task.leaseOwner,claim.workerId())||task.leaseVersion!=claim.leaseVersion()||task.leaseUntil==null||!now.isBefore(task.leaseUntil))
+            throw new TaskLeaseLostException(claim.taskId());
+    }
+    /** Keeps in-memory checkpoint writes atomic relative to takeover. */
+    @Override public void withLease(ClaimedTask claim,Instant now,Runnable writes){synchronized(lock){requireClaim(claim,now);writes.run();}}
+    /** Renews an unexpired generation without changing its fencing token. */
+    @Override public boolean renewLease(ClaimedTask claim,Instant now,Duration lease){
+        synchronized(lock){
+            if(lease.toMillis()<3)throw new IllegalArgumentException("lease must be at least 3ms");
+            try{requireClaim(claim,now);}catch(TaskLeaseLostException lost){return false;}
+            tasks.get(claim.taskId()).leaseUntil=now.plus(lease);return true;
+        }
+    }
+
     private void refreshReady(TaskState task){
         if(!"PENDING".equals(task.status))return;
         boolean ready=task.dependencies.stream().allMatch(dep->tasks.values().stream().anyMatch(o->task.planId.equals(o.planId)&&dep.equals(o.taskKey)&&"SUCCEEDED".equals(o.status)));

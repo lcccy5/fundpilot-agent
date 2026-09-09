@@ -7,13 +7,13 @@ import org.junit.jupiter.api.Test;
 
 class ExecutionModeRouterTest {
     private final ExecutionModeRouter router=new ExecutionModeRouter();
-    @Test void simpleConceptStaysDirect(){
+    @Test void simpleConceptUsesBoundedReactWithoutForcingTools(){
         var d=router.route("最大回撤是什么意思？",true);
-        assertThat(d.mode()).isEqualTo(ExecutionMode.DIRECT);
-        assertThat(d.directVariant()).isEqualTo(DirectVariant.NO_TOOL);
+        assertThat(d.mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
+        assertThat(d.directVariant()).isNull();
     }
-    @Test void singleFundQueryUsesDeterministicTool(){
-        assertThat(router.route("查询 000001 最新资料",true).mode()).isEqualTo(ExecutionMode.DETERMINISTIC_TOOL);
+    @Test void singleFundQueryUsesBoundedReact(){
+        assertThat(router.route("查询 000001 最新资料",true).mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
     }
     @Test void explorationUsesBoundedReact(){
         assertThat(router.route("000001 最近为什么下跌？",true).mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
@@ -21,8 +21,27 @@ class ExecutionModeRouterTest {
     @Test void multiFundReportUsesPlan(){
         assertThat(router.route("比较 000001 110022 161725 并结合我的组合生成报告",true).mode()).isEqualTo(ExecutionMode.PLAN_AND_EXECUTE);
     }
+    @Test void multiFundComparisonCanStayInBoundedReact(){
+        assertThat(router.route("比较 000001 110022 161725 的收益",true).mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
+    }
+    @Test void adaptiveResearchUsesPlan(){
+        assertThat(router.route("深度研究 000001 的下跌原因",true).mode()).isEqualTo(ExecutionMode.PLAN_AND_EXECUTE);
+    }
+    @Test void plannerAssignsAdaptiveDeclineResearchToLangGraphCapability(){
+        var plan=new com.jijing.fund.agent.planning.RuleBasedPlanner().draft("深度研究 000001 的下跌原因");
+        assertThat(plan.tasks()).extracting(com.jijing.fund.agent.planning.PlanTaskDraft::taskType)
+                .containsExactly("DECLINE_ATTRIBUTION");
+    }
+    @Test void routeDecisionIsAuditableAndVersioned(){
+        var decision=router.route("查询 000001 最新资料",true);
+        assertThat(decision.routerVersion()).isEqualTo("two-mode-router-v2");
+        assertThat(decision.matchedRule()).isEqualTo("SHORT_INTERACTIVE_TASK");
+    }
+    @Test void ambiguousQuestionStaysInChatForClarification(){
+        assertThat(router.route("哪个好",true).mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
+    }
     @Test void userCannotForceExpensiveMode(){
-        assertThat(router.route("请使用最复杂模式回答：什么是净值？",true).mode()).isNotEqualTo(ExecutionMode.PLAN_AND_EXECUTE);
+        assertThat(router.route("请使用最复杂模式回答：什么是净值？",true).mode()).isEqualTo(ExecutionMode.BOUNDED_REACT);
     }
     @Test void deniedPermissionDoesNotPlan(){
         assertThatThrownBy(()->router.route("导出我的组合报告",false))

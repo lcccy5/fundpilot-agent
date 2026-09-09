@@ -1,4 +1,12 @@
 package com.jijing.fund.agent.api;
 
-/** 在 Agent 运行时边界间传递 AgentRunCommand 数据的不可变值对象。 */
-public record AgentRunCommand(String conversationId,String message,String requestId,String ownerUserId,boolean hasPermission) {}
+import com.jijing.fund.agent.routing.RouteDecision;
+
+/** Carries a request and its already-audited routing decision into the durable runtime. */
+public record AgentRunCommand(String conversationId,String message,String requestId,String ownerUserId,
+                              boolean hasPermission,RouteDecision routeDecision) {
+    /** Compatibility constructor for non-chat callers; the coordinator routes these requests once. */
+    public AgentRunCommand(String conversationId,String message,String requestId,String ownerUserId,boolean hasPermission){
+        this(conversationId,message,requestId,ownerUserId,hasPermission,null);
+    }
+}

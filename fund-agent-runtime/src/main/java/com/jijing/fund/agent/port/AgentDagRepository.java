@@ -41,14 +41,14 @@ public interface AgentDagRepository {
     /** 通过 claimReady 操作更新持久化或内存中的运行状态。 */
     Optional<ClaimedTask> claimReady(String workerId,Instant now,Duration lease);
     
-    /** 通过 completeTask 操作更新持久化或内存中的运行状态。 */
-    void completeTask(String taskId,String executionKey,String outputUri,List<String> evidenceIds,Instant now);
+    /** Atomically commits success only for the current unexpired claim; stale claims throw TaskLeaseLostException. */
+    void completeTask(ClaimedTask claim,String executionKey,String outputUri,List<String> evidenceIds,Instant now);
 
-    /** Records a non-retryable task error and exposes its reason through the owned run events. */
-    void failTask(String taskId,String reason,Instant now);
+    /** Records an error only for the current unexpired claim; stale claims must never fail a successor. */
+    void failTask(ClaimedTask claim,String reason,Instant now);
     
-    /** 通过 markWaitingApproval 操作更新持久化或内存中的运行状态。 */
-    void markWaitingApproval(String taskId,String approvalId,Instant now);
+    /** Transitions the current unexpired claim to approval wait; stale claims are rejected. */
+    void markWaitingApproval(ClaimedTask claim,String approvalId,Instant now);
     
     /** 通过 markTaskReady 操作更新持久化或内存中的运行状态。 */
     void markTaskReady(String taskId);
@@ -77,6 +77,17 @@ public interface AgentDagRepository {
     /** 判断 isSideEffectAuthorized 对应的条件是否成立。 */
     boolean isSideEffectAuthorized(String taskId);
     
+    /** Renews only an unexpired RUNNING claim; false means ownership was lost. */
+    boolean renewLease(ClaimedTask claim, Instant now, Duration lease);
+
+    /** Runs short database writes under the claim lock and transaction; never perform external I/O here. */
+    void withLease(ClaimedTask claim, Instant now, Runnable writes);
+
     /** 在 Agent 运行时边界间传递 ClaimedTask 数据的不可变值对象。 */
-    record ClaimedTask(String taskId,String runId,String planId,int planVersion,String taskKey,String capabilityType,String inputJson,String inputHash,int attempt,String ownerUserId){}
+    record ClaimedTask(String taskId,String runId,String planId,int planVersion,String taskKey,String capabilityType,String inputJson,String inputHash,int attempt,String ownerUserId,String workerId,long leaseVersion){
+        /** Keeps legacy standalone capability callers source-compatible; this claim cannot authorize writes. */
+        public ClaimedTask(String taskId,String runId,String planId,int planVersion,String taskKey,String capabilityType,String inputJson,String inputHash,int attempt,String ownerUserId){
+            this(taskId,runId,planId,planVersion,taskKey,capabilityType,inputJson,inputHash,attempt,ownerUserId,null,0);
+        }
+    }
 }
