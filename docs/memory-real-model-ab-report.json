@@ -1,0 +1,158 @@
+{
+  "datasetVersion" : "memory-real-model-ab-v1",
+  "scenarios" : 5,
+  "turnsPerScenario" : 8,
+  "turnsPerGroup" : 40,
+  "comparableTurns" : 32,
+  "baseline" : {
+    "turns" : 40,
+    "observedModelCalls" : 82,
+    "promptTokens" : 171113,
+    "completionTokens" : 41535,
+    "totalTokens" : 212648,
+    "toolCalls" : 45,
+    "repeatedToolCalls" : 24,
+    "qualityPassRatePercent" : 85.0
+  },
+  "memory" : {
+    "turns" : 40,
+    "observedModelCalls" : 55,
+    "promptTokens" : 187666,
+    "completionTokens" : 29643,
+    "totalTokens" : 217309,
+    "toolCalls" : 15,
+    "repeatedToolCalls" : 0,
+    "qualityPassRatePercent" : 95.0
+  },
+  "promptTokenChangePercent" : 9.67,
+  "totalTokenChangePercent" : 2.19,
+  "factCardEffectiveHitRatePercent" : 92.0,
+  "repeatedToolCallReductionPercent" : 100.0,
+  "scenarioComparisons" : [ {
+    "scenario" : 0,
+    "baseline" : {
+      "turns" : 8,
+      "observedModelCalls" : 16,
+      "promptTokens" : 32553,
+      "completionTokens" : 8357,
+      "totalTokens" : 40910,
+      "toolCalls" : 9,
+      "repeatedToolCalls" : 4,
+      "qualityPassRatePercent" : 87.5
+    },
+    "memory" : {
+      "turns" : 8,
+      "observedModelCalls" : 11,
+      "promptTokens" : 39221,
+      "completionTokens" : 6688,
+      "totalTokens" : 45909,
+      "toolCalls" : 3,
+      "repeatedToolCalls" : 0,
+      "qualityPassRatePercent" : 100.0
+    },
+    "promptTokenChangePercent" : 20.48,
+    "totalTokenChangePercent" : 12.22,
+    "repeatedToolCallReductionPercent" : 100.0
+  }, {
+    "scenario" : 1,
+    "baseline" : {
+      "turns" : 8,
+      "observedModelCalls" : 16,
+      "promptTokens" : 32553,
+      "completionTokens" : 7600,
+      "totalTokens" : 40153,
+      "toolCalls" : 9,
+      "repeatedToolCalls" : 5,
+      "qualityPassRatePercent" : 87.5
+    },
+    "memory" : {
+      "turns" : 8,
+      "observedModelCalls" : 11,
+      "promptTokens" : 36896,
+      "completionTokens" : 5490,
+      "totalTokens" : 42386,
+      "toolCalls" : 3,
+      "repeatedToolCalls" : 0,
+      "qualityPassRatePercent" : 87.5
+    },
+    "promptTokenChangePercent" : 13.34,
+    "totalTokenChangePercent" : 5.56,
+    "repeatedToolCallReductionPercent" : 100.0
+  }, {
+    "scenario" : 2,
+    "baseline" : {
+      "turns" : 8,
+      "observedModelCalls" : 16,
+      "promptTokens" : 32560,
+      "completionTokens" : 8237,
+      "totalTokens" : 40797,
+      "toolCalls" : 9,
+      "repeatedToolCalls" : 5,
+      "qualityPassRatePercent" : 75.0
+    },
+    "memory" : {
+      "turns" : 8,
+      "observedModelCalls" : 11,
+      "promptTokens" : 37222,
+      "completionTokens" : 5539,
+      "totalTokens" : 42761,
+      "toolCalls" : 3,
+      "repeatedToolCalls" : 0,
+      "qualityPassRatePercent" : 100.0
+    },
+    "promptTokenChangePercent" : 14.32,
+    "totalTokenChangePercent" : 4.81,
+    "repeatedToolCallReductionPercent" : 100.0
+  }, {
+    "scenario" : 3,
+    "baseline" : {
+      "turns" : 8,
+      "observedModelCalls" : 17,
+      "promptTokens" : 36723,
+      "completionTokens" : 8238,
+      "totalTokens" : 44961,
+      "toolCalls" : 9,
+      "repeatedToolCalls" : 5,
+      "qualityPassRatePercent" : 87.5
+    },
+    "memory" : {
+      "turns" : 8,
+      "observedModelCalls" : 11,
+      "promptTokens" : 36821,
+      "completionTokens" : 5602,
+      "totalTokens" : 42423,
+      "toolCalls" : 3,
+      "repeatedToolCalls" : 0,
+      "qualityPassRatePercent" : 100.0
+    },
+    "promptTokenChangePercent" : 0.27,
+    "totalTokenChangePercent" : -5.64,
+    "repeatedToolCallReductionPercent" : 100.0
+  }, {
+    "scenario" : 4,
+    "baseline" : {
+      "turns" : 8,
+      "observedModelCalls" : 17,
+      "promptTokens" : 36724,
+      "completionTokens" : 9103,
+      "totalTokens" : 45827,
+      "toolCalls" : 9,
+      "repeatedToolCalls" : 5,
+      "qualityPassRatePercent" : 87.5
+    },
+    "memory" : {
+      "turns" : 8,
+      "observedModelCalls" : 11,
+      "promptTokens" : 37506,
+      "completionTokens" : 6324,
+      "totalTokens" : 43830,
+      "toolCalls" : 3,
+      "repeatedToolCalls" : 0,
+      "qualityPassRatePercent" : 87.5
+    },
+    "promptTokenChangePercent" : 2.13,
+    "totalTokenChangePercent" : -4.36,
+    "repeatedToolCallReductionPercent" : 100.0
+  } ],
+  "methodology" : "A uses a fresh conversation and standalone question per turn; C uses one conversation and contextual questions with production chat/fact memory"
+}

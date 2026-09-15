@@ -62,6 +62,22 @@ class MySqlMigrationIntegrationTest {
 
     @Test @Transactional void persistsVersionedKnowledgeDocumentMetadata(){assertTestDatabase();var repository=new JdbcDocumentMetadataRepository(jdbc,new ObjectMapper().findAndRegisterModules());var command=new RegisterDocumentCommand("integration-doc","季度报告",FundDocumentType.QUARTERLY_REPORT,"测试基金","integration",URI.create("https://example.test/q.txt"),LocalDate.of(2026,6,30),Set.of("000001"),"q.txt","text/plain","integration content".getBytes());Instant now=Instant.parse("2026-08-23T08:00:00Z");var first=repository.register(command,"c".repeat(64),"cc/file.txt",now);var duplicate=repository.register(command,"c".repeat(64),"cc/file.txt",now);assertFalse(first.duplicate());assertTrue(duplicate.duplicate());assertEquals(first.versionId(),duplicate.versionId());assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_document_version WHERE version_id=?",Integer.class,first.versionId()));}
 
+    @Test @Transactional void keepsOneCurrentMemoryFilePerFundCategoryAndPersistsConversationNote(){
+        assertTestDatabase();String conversationId=UUID.randomUUID().toString();Instant now=Instant.parse("2026-09-10T08:00:00Z");
+        agentRuntimeRepository.createConversation(conversationId,now);
+        String firstRun=agentRuntimeRepository.startRun(conversationId,"memory-1","p","a".repeat(64),"t","fake","fake",now);
+        String secondRun=agentRuntimeRepository.startRun(conversationId,"memory-2","p","a".repeat(64),"t","fake","fake",now.plusSeconds(1));
+        var oldEvidence=new com.jijing.fund.agent.api.EvidenceReference("ev-old","FUND_PROFILE","000001",null,null,null,"test",null,null,now);
+        var newEvidence=new com.jijing.fund.agent.api.EvidenceReference("ev-new","FUND_PROFILE","000001",null,null,null,"test",null,null,now.plusSeconds(1));
+        agentRuntimeRepository.saveFactCard(new com.jijing.fund.agent.api.AgentFactCard(UUID.randomUUID().toString(),conversationId,firstRun,"get_fund_profile","000001",List.of(oldEvidence),"{\"manager\":\"old\"}",now,now.plusSeconds(3600)));
+        agentRuntimeRepository.saveFactCard(new com.jijing.fund.agent.api.AgentFactCard(UUID.randomUUID().toString(),conversationId,secondRun,"get_fund_profile","000001",List.of(newEvidence),"{\"manager\":\"new\"}",now.plusSeconds(1),now.plusSeconds(3601)));
+        var current=agentRuntimeRepository.findActiveFactCards(conversationId,now.plusSeconds(2),10);
+        assertEquals(1,current.size());assertTrue(current.getFirst().dataJson().contains("new"));
+        var state=new com.jijing.fund.agent.api.AgentConversationState(conversationId,"000001",List.of("000001","110022"),LocalDate.of(2026,1,1),LocalDate.of(2026,8,31),"METRICS",now);
+        agentRuntimeRepository.saveConversationState(state);
+        assertEquals(state,agentRuntimeRepository.findConversationState(conversationId));
+    }
+
     @Test
     @Transactional
     void persistsConversationMemoryRunAndToolAudit() {

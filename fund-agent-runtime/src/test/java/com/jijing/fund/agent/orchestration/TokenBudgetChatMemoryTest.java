@@ -20,4 +20,14 @@ class TokenBudgetChatMemoryTest {
         memory.add("conversation",List.of(new UserMessage("第一问"),new AssistantMessage("第一答"),new UserMessage("第二问"),new AssistantMessage("第二答")));
         assertThat(memory.get("conversation")).extracting(Message::getText).containsExactly("第二问","第二答");
     }
+
+    @Test void fourMessageCapKeepsExactlyTwoCompleteRounds(){
+        var memory=new TokenBudgetChatMemory(new InMemoryChatMemoryRepository(),3000,4);
+        memory.add("conversation",List.of(
+                new UserMessage("第一问"),new AssistantMessage("第一答"),
+                new UserMessage("第二问"),new AssistantMessage("第二答"),
+                new UserMessage("第三问"),new AssistantMessage("第三答")));
+        assertThat(memory.get("conversation")).extracting(Message::getText)
+                .containsExactly("第二问","第二答","第三问","第三答");
+    }
 }

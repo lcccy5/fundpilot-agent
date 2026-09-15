@@ -32,4 +32,6 @@ public interface AgentRuntimeRepository {
     default void saveFactCard(AgentFactCard card) {}
     default List<AgentFactCard> findActiveFactCards(String conversationId, Instant now, int limit) { return List.of(); }
     default void recordFactCardUsage(String runId, List<String> cardIds, Instant usedAt) {}
+    default AgentConversationState findConversationState(String conversationId) { return AgentConversationState.empty(conversationId); }
+    default void saveConversationState(AgentConversationState state) {}
 }

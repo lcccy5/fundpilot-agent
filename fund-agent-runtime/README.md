@@ -2,17 +2,17 @@
 
 该模块承载 Spring AI 模型编排、只读基金工具、MySQL 会话记忆、证据校验、执行审计和确定性安全策略。复杂任务由持久化 Plan/DAG Runtime 调度，并通过 LangGraph4j 研究子图编排固定角色、条件路由、受限重试和 JDBC 检查点；普通查询继续使用成本更低的直接 Tool 或单 Agent 路径。
 
-会话记忆采用两层预算：普通用户/助手消息保存在 `agent_message`，按近似 Token 预算裁剪，同时保留消息条数安全上限；成功工具结果会确定性序列化为短期 `agent_fact_card`，保存完整 `EvidenceReference`、结构化数据和过期时间。后续轮次只加载仍有效且落在独立 Fact Card Token 预算内的数据，并将对应证据注入当前执行 Trace，使跨轮事实复用仍能通过引用校验；`agent_fact_card_usage` 精确记录每个 Run 实际消费的卡片。该过程不使用 LLM 自由文本摘要。
+会话记忆保留最近两个完整问答轮次，并同时受 3000 Token 上限约束。`agent_conversation_state` 以结构化小便签保存当前基金、已提及基金、时间区间和主题，不使用 LLM 自由文本摘要。成功工具结果按“会话 / 基金 / 分类”进入逻辑记忆文件夹；同类新结果替换当前指针，旧卡只保留审计。后续轮次按问题选择分类，每只基金组装一张 `FUND_MEMORY`，最多三只基金，并将对应 Evidence 注入当前执行 Trace。
 
 默认配置：
 
 ```yaml
 fund:
   agent:
-    max-conversation-tokens: 8000
-    max-conversation-messages: 20
-    fact-card-token-budget: 3000
-    fact-card-max-count: 12
+    max-conversation-messages: 4
+    max-conversation-tokens: 3000
+    fact-card-token-budget: 1200
+    fact-card-max-count: 3
     fact-card-default-ttl: 24h
 ```
 

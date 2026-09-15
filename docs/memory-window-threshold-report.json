@@ -1,0 +1,156 @@
+{
+  "datasetVersion" : "memory-window-threshold-v1",
+  "turns" : 16,
+  "maxMessages" : 20,
+  "maxTokens" : 8000,
+  "firstTrimTurn" : 11,
+  "bindingThreshold" : "MESSAGE_COUNT",
+  "messagesAtFirstTrim" : 20,
+  "tokensAtFirstTrim" : 2898,
+  "earlyProfileReusedAfterEviction" : true,
+  "observations" : [ {
+    "turn" : 1,
+    "runId" : "a17daac6-e195-4a27-9cea-ecfccc8356bb",
+    "storedMessages" : 2,
+    "storedTokens" : 354,
+    "toolCalls" : 1,
+    "profileToolCalls" : 1,
+    "profileFactsUsed" : 0,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 2,
+    "runId" : "5462d53a-f5a1-4c2c-a69f-b04057dc97f8",
+    "storedMessages" : 4,
+    "storedTokens" : 873,
+    "toolCalls" : 1,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 3,
+    "runId" : "e37d3b6e-7e9f-40bd-ae5c-3d2f0dc2c140",
+    "storedMessages" : 6,
+    "storedTokens" : 1196,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 4,
+    "runId" : "7041523e-0556-48b6-bb71-dfeae1c81f3d",
+    "storedMessages" : 8,
+    "storedTokens" : 1493,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 5,
+    "runId" : "5e80efeb-fa09-4128-9ddf-120cb96b9c12",
+    "storedMessages" : 10,
+    "storedTokens" : 1965,
+    "toolCalls" : 1,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 6,
+    "runId" : "e33b4634-7f3d-49c0-a604-edccd17f0bc8",
+    "storedMessages" : 12,
+    "storedTokens" : 2186,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 7,
+    "runId" : "2f562c8a-26c3-477b-9f8b-87259cafad22",
+    "storedMessages" : 14,
+    "storedTokens" : 2494,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 8,
+    "runId" : "c704f6a5-8c4d-40d4-a427-4c7ce310e7c2",
+    "storedMessages" : 16,
+    "storedTokens" : 2632,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 9,
+    "runId" : "02ebfcd7-4f90-4b5f-b0bf-980c65612311",
+    "storedMessages" : 18,
+    "storedTokens" : 2772,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 10,
+    "runId" : "7280d27b-5d91-4fa4-b9a4-1c38a1f983ee",
+    "storedMessages" : 20,
+    "storedTokens" : 2913,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 11,
+    "runId" : "8820432d-aa79-449e-9ecb-40f4532fe78e",
+    "storedMessages" : 20,
+    "storedTokens" : 2898,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 12,
+    "runId" : "4779abac-be3e-4402-846a-c74c827b3e95",
+    "storedMessages" : 20,
+    "storedTokens" : 2675,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 13,
+    "runId" : "ac4d7b02-9ea5-408d-864a-ac2f01e39deb",
+    "storedMessages" : 20,
+    "storedTokens" : 2514,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 14,
+    "runId" : "cb4ff97f-4bfa-413f-b1c9-927356b66085",
+    "storedMessages" : 20,
+    "storedTokens" : 2670,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 15,
+    "runId" : "4600718a-2e72-40d9-9a29-6d527354f1a6",
+    "storedMessages" : 20,
+    "storedTokens" : 2348,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  }, {
+    "turn" : 16,
+    "runId" : "bb789091-7b29-46d9-b4bd-f3dd65b00c70",
+    "storedMessages" : 20,
+    "storedTokens" : 2302,
+    "toolCalls" : 0,
+    "profileToolCalls" : 0,
+    "profileFactsUsed" : 1,
+    "responseSucceeded" : true
+  } ]
+}

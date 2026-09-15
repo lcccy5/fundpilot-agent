@@ -1,0 +1,40 @@
+{
+  "datasetVersion": "memory-current-design-ab-v1",
+  "evaluatedAt": "2026-09-10",
+  "modelName": "qwen3.7-max",
+  "taskGroups": 8,
+  "turnsPerArm": 16,
+  "baseline": {
+    "modelCalls": 37,
+    "promptTokens": 94553,
+    "completionTokens": 21110,
+    "totalTokens": 115663,
+    "toolCalls": 24,
+    "repeatedToolCalls": 7,
+    "qualityPassRatePercent": 81.25
+  },
+  "memory": {
+    "modelCalls": 26,
+    "promptTokens": 58617,
+    "completionTokens": 16501,
+    "totalTokens": 75118,
+    "toolCalls": 10,
+    "repeatedToolCalls": 0,
+    "qualityPassRatePercent": 87.5
+  },
+  "promptTokenReductionPercent": 38.01,
+  "completionTokenReductionPercent": 21.83,
+  "totalTokenReductionPercent": 35.05,
+  "toolCallReductionPercent": 58.33,
+  "modelCallReductionPercent": 29.73,
+  "effectiveFactHitRatePercent": 87.5,
+  "followUps": {
+    "turnsPerArm": 8,
+    "baselineTotalTokens": 68240,
+    "memoryTotalTokens": 20534,
+    "promptTokenReductionPercent": 74.66,
+    "totalTokenReductionPercent": 69.91,
+    "toolCallReductionPercent": 100.0
+  },
+  "methodology": "A uses a fresh conversation and a self-contained question for every turn. B uses one conversation per 1-3 turn user task and natural follow-ups with the current two-turn window, conversation note, TTL and query-aware per-fund memory. Token usage includes all ReAct model calls within each user turn."
+}

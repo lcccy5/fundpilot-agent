@@ -71,10 +71,12 @@ fund:
     run-timeout: 60s
     tool-timeout: 15s
     max-user-message-chars: 2000
-    max-conversation-messages: 20
-    max-conversation-tokens: 8000
-    fact-card-token-budget: 3000
-    fact-card-max-count: 12
+    # Two complete user/assistant turns, also bounded by the independent token ceiling.
+    max-conversation-messages: 4
+    max-conversation-tokens: 3000
+    # At most one assembled memory card per fund and three funds per request.
+    fact-card-token-budget: 1200
+    fact-card-max-count: 3
     fact-card-default-ttl: 24h
   knowledge:
     enabled: false
