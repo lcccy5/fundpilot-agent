@@ -39,9 +39,11 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
     }
     @Override @Transactional public void saveRoute(String runId,String ownerUserId,RouteDecision decision,Instant now){
         jdbc.update("""
-                INSERT INTO agent_route_decision(decision_id,run_id,owner_user_id,execution_mode,direct_variant,router_version,features_json,matched_rule,created_at)
-                VALUES(?,?,?,?,?,?,CAST(? AS JSON),?,?)
-                """,UUID.randomUUID().toString(),runId,ownerUserId,decision.mode().name(),decision.directVariant()==null?null:decision.directVariant().name(),decision.routerVersion(),json(decision.features()),decision.matchedRule(),ts(now));
+                INSERT INTO agent_route_decision(decision_id,run_id,owner_user_id,execution_mode,direct_variant,router_version,features_json,matched_rule,model_suggestion,override_reason,created_at)
+                VALUES(?,?,?,?,?,?,CAST(? AS JSON),?,?,?,?)
+                """,UUID.randomUUID().toString(),runId,ownerUserId,decision.mode().name(),decision.directVariant()==null?null:decision.directVariant().name(),decision.routerVersion(),json(decision.features()),decision.matchedRule(),truncate(decision.modelSuggestion(),32),truncate(decision.overrideReason(),128),ts(now));
+        jdbc.update("UPDATE agent_run SET execution_mode=?,router_version=?,route_reason=? WHERE run_id=?",
+                decision.mode().name(),decision.routerVersion(),decision.matchedRule(),runId);
         appendEvent(runId,"run.routed","{\"mode\":\""+decision.mode()+"\",\"rule\":\""+decision.matchedRule()+"\"}",now);
     }
     @Override @Transactional public String saveValidatedPlan(String runId,String ownerUserId,PlanDraft draft,Instant now){
@@ -304,5 +306,5 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
         catch(Exception e){throw new IllegalStateException(e);}
     }
     private Timestamp ts(Instant value){return Timestamp.from(value);}
-    private String truncate(String value,int max){return value.length()<=max?value:value.substring(0,max);}
+    private String truncate(String value,int max){return value==null?null:value.length()<=max?value:value.substring(0,max);}
 }

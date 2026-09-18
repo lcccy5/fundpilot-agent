@@ -1,6 +1,6 @@
 package com.jijing.fund.agent.orchestration;
 
-import com.jijing.fund.agent.routing.ExecutionModeRouter;
+import com.jijing.fund.agent.routing.*;
 import com.jijing.fund.agent.capability.*;
 import com.jijing.fund.agent.tool.*;
 import com.jijing.fund.application.*;
@@ -39,7 +39,29 @@ public class FundAgentConfiguration {
         return new AgentModelDescriptor(environment.getProperty("spring.ai.model.chat","unknown"),
                 environment.getProperty("spring.ai.openai.chat.options.model","configured"));
     }
-    @Bean ExecutionModeRouter executionModeRouter(){return new ExecutionModeRouter();}
+    @Bean @ConditionalOnProperty(prefix="fund.agent.routing",name="semantic-enabled",havingValue="true")
+    RouteAdvisor semanticRouteAdvisor(com.fasterxml.jackson.databind.ObjectMapper mapper,Environment environment,
+            io.micrometer.observation.ObservationRegistry observations){
+        java.time.Duration timeout=environment.getProperty("fund.agent.routing.semantic-timeout",java.time.Duration.class,java.time.Duration.ofSeconds(3));
+        String apiKey=environment.getProperty("fund.agent.routing.api-key","");
+        if(!org.springframework.util.StringUtils.hasText(apiKey))return (message,features)->java.util.Optional.empty();
+        String baseUrl=environment.getProperty("fund.agent.routing.base-url","https://dashscope.aliyuncs.com/compatible-mode/v1");
+        String model=environment.getProperty("fund.agent.routing.model","qwen3.8-flash");
+        var httpClient=java.net.http.HttpClient.newBuilder().connectTimeout(environment.getProperty("fund.agent.routing.connect-timeout",java.time.Duration.class,java.time.Duration.ofSeconds(1))).build();
+        var requestFactory=new org.springframework.http.client.JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(environment.getProperty("fund.agent.routing.read-timeout",java.time.Duration.class,timeout));
+        var api=org.springframework.ai.openai.api.OpenAiApi.builder().baseUrl(baseUrl).completionsPath("/chat/completions").apiKey(apiKey)
+                .restClientBuilder(org.springframework.web.client.RestClient.builder().requestFactory(requestFactory)).build();
+        var options=org.springframework.ai.openai.OpenAiChatOptions.builder().model(model).temperature(0.0).maxTokens(400)
+                .parallelToolCalls(false).extraBody(java.util.Map.of("enable_thinking",false)).build();
+        var routerModel=org.springframework.ai.openai.OpenAiChatModel.builder().openAiApi(api).defaultOptions(options)
+                .observationRegistry(observations).build();
+        return new SpringAiRouteAdvisor(routerModel,mapper,timeout);
+    }
+    @Bean ExecutionModeRouter executionModeRouter(ObjectProvider<RouteAdvisor> advisors,Environment environment){
+        RouteAdvisor advisor=advisors.getIfAvailable(()->(message,features)->java.util.Optional.empty());
+        return new ExecutionModeRouter(advisor);
+    }
     @Bean CapabilityExecutorRegistry capabilityExecutorRegistry(java.util.List<AgentCapabilityExecutor> executors){return new CapabilityExecutorRegistry(executors);}
     /** Supplies an in-memory store only when the infrastructure JDBC adapter is not part of the current application. */
     @Bean @ConditionalOnMissingBean(com.jijing.fund.agent.graph.GraphCheckpointStore.class)

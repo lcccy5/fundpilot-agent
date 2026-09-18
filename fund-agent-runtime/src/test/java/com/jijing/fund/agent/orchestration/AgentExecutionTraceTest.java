@@ -23,6 +23,13 @@ class AgentExecutionTraceTest {
         assertThatThrownBy(()->trace.call(invocation,()->{Thread.sleep(500);return "late";}))
                 .isInstanceOf(AgentExecutionLimitException.class).hasMessageContaining("timed out");
     }
+    @Test void exceedingBoundedToolBudgetProducesDedicatedEscalationSignal(){
+        var trace=new AgentExecutionTrace("run-budget",mock(AgentRuntimeRepository.class),new ObjectMapper(),1,2,Duration.ofSeconds(1));
+        trace.begin("profile",new Input("000001"));
+        assertThatThrownBy(()->trace.begin("metrics",new Input("000001")))
+                .isInstanceOf(com.jijing.fund.agent.exception.AgentModeEscalationException.class)
+                .hasMessageContaining("budget exhausted");
+    }
     @Test void persistsDeterministicFactCardForSuccessfulObservation(){
         AgentRuntimeRepository repository=mock(AgentRuntimeRepository.class);
         var trace=new AgentExecutionTrace("conversation-1","run-3",repository,new ObjectMapper(),6,1,Duration.ofSeconds(1),Duration.ofHours(24),event->{});

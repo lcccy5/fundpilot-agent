@@ -4,6 +4,7 @@ import com.jijing.fund.agent.api.*;
 import java.time.Instant;
 import java.util.List;
 import com.jijing.fund.domain.identity.UserId;
+import com.jijing.fund.agent.routing.RouteDecision;
 
 /** 定义 AgentRuntimeRepository 在 Agent 运行时中的能力契约。 */
 public interface AgentRuntimeRepository {
@@ -19,6 +20,10 @@ public interface AgentRuntimeRepository {
     /** 创建并初始化当前 Agent 操作所需的 startRun 结果。 */
     String startRun(String conversationId, String requestId, String promptVersion, String promptHash,
             String toolSchemaVersion, String modelProvider, String modelName, Instant startedAt);
+    /** Persists the route chosen for a direct run; graph adapters may override separately. */
+    default void recordRouteDecision(String runId,String ownerUserId,RouteDecision decision,Instant createdAt) {}
+    /** Links a promoted durable run to the bounded run that triggered it. */
+    default void linkEscalatedRun(String childRunId,String parentRunId) {}
     
     /** 通过 completeRun 操作更新持久化或内存中的运行状态。 */
     void completeRun(String runId, int modelRounds, int toolCalls, TokenUsage usage, long durationMs, Instant completedAt);

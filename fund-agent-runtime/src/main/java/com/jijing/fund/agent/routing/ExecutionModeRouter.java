@@ -1,13 +1,21 @@
 package com.jijing.fund.agent.routing;
 
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import com.jijing.fund.agent.exception.AgentPolicyViolationException;
 
 /** Deterministic complexity router. Models may suggest, rules decide. */
 public final class ExecutionModeRouter {
-    public static final String VERSION="two-mode-router-v2";
+    public static final String VERSION="hybrid-router-v4";
     private static final Pattern FUND=Pattern.compile("\\d{6}");
+    private final RouteAdvisor advisor;
+
+    public ExecutionModeRouter(){this((message,features)->Optional.empty());}
+    public ExecutionModeRouter(RouteAdvisor advisor){
+        this.advisor=Objects.requireNonNull(advisor,"advisor is required");
+    }
     
     /** 执行该 Agent 运行时组件中的 route 操作。 */
     public RouteDecision route(String message,boolean hasPermission){
@@ -22,6 +30,14 @@ public final class ExecutionModeRouter {
             return decision(ExecutionMode.PLAN_AND_EXECUTE,features,"MULTI_STAGE_OR_REPORT");
         if(features.adaptiveResearchRequired())
             return decision(ExecutionMode.PLAN_AND_EXECUTE,features,"ADAPTIVE_RESEARCH_REQUIRED");
+        Optional<RouteAdvice> advice;
+        try{advice=advisor.advise(text,features);}catch(RuntimeException ignored){advice=Optional.empty();}
+        if(advice.isPresent()){
+            RouteAdvice value=advice.get();
+            RouteFeatures enriched=features.withSemanticAdvice(value);
+            if(semanticRequiresPlan(value))return semanticDecision(enriched,value,"SEMANTIC_COMPLEXITY");
+            return decision(ExecutionMode.BOUNDED_REACT,enriched,features.clarificationRequired()?"CLARIFICATION_IN_CHAT":"SEMANTIC_BOUNDED_TASK");
+        }
         return decision(ExecutionMode.BOUNDED_REACT,features,features.clarificationRequired()?"CLARIFICATION_IN_CHAT":"SHORT_INTERACTIVE_TASK");
     }
     
@@ -42,12 +58,22 @@ public final class ExecutionModeRouter {
         boolean dependent=containsAny(text,"并结合","然后","再根据","并生成","综合")&&intents>=2;
         int stages=report?Math.max(2,intents):dependent?2:1;
         return new RouteFeatures(funds,Math.max(1,intents),estimated,stages,personal,document,market,report,
-                export,export,background,adaptive,clarification);
+                export,export,background,adaptive,clarification,0,0,0,false,false,false);
     }
     
     /** 执行该 Agent 运行时组件中的 decision 操作。 */
     private RouteDecision decision(ExecutionMode mode,RouteFeatures features,String rule){
         return new RouteDecision(mode,null,VERSION,features,rule,null,null);
+    }
+    private RouteDecision semanticDecision(RouteFeatures features,RouteAdvice advice,String rule){
+        return new RouteDecision(ExecutionMode.PLAN_AND_EXECUTE,null,VERSION,features,rule,
+                "SEMANTIC_FEATURES",advice.rationale());
+    }
+    private boolean semanticRequiresPlan(RouteAdvice advice){
+        boolean dependentGoals=advice.goals().size()>=2&&advice.hasDependencies()&&advice.estimatedStages()>=2;
+        boolean crossSource=advice.crossSourceVerificationRequired()&&advice.requiredCapabilities().size()>=2;
+        boolean iterative=advice.iterativeResearchRequired()&&advice.estimatedStages()>=2;
+        return dependentGoals||crossSource||iterative||advice.estimatedStages()>=3;
     }
     private boolean containsAny(String text,String... values){return java.util.Arrays.stream(values).anyMatch(text::contains);}
 }

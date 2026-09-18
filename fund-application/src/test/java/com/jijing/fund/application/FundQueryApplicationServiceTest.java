@@ -6,6 +6,7 @@ import com.jijing.fund.domain.model.*;
 import com.jijing.fund.domain.provider.ExternalFundDataProvider;
 import com.jijing.fund.domain.repository.*;
 import java.time.*;
+import java.math.BigDecimal;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -46,5 +47,29 @@ class FundQueryApplicationServiceTest {
         assertEquals("华夏科创50ETF联接A", result.name());
         verify(funds).save(profile);
         verify(cache).putProfile(profile);
+    }
+
+    @Test void refreshesAStaleCachedTailForCurrentPeriodQueries() {
+        FundCode code = new FundCode("000001");
+        LocalDate start = LocalDate.of(2025, 2, 1), end = LocalDate.of(2026, 2, 1);
+        var stale = nav(code, LocalDate.of(2026, 1, 20), "1.10");
+        var latest = nav(code, LocalDate.of(2026, 1, 30), "1.12");
+        var profile = new FundProfile(code, "测试基金", "混合型", "测试基金", "测试经理", start,
+                "eastmoney-public", Instant.parse("2026-01-31T00:00:00Z"), Instant.parse("2026-01-31T00:00:00Z"));
+        when(cache.getHistory(code, start, end)).thenReturn(Optional.of(List.of(stale)));
+        when(navs.findHistory(code, start, end)).thenReturn(List.of(stale), List.of(stale, latest));
+        when(funds.findByCode(code)).thenReturn(Optional.of(profile));
+        when(provider.fetchNavHistory(code, start, end)).thenReturn(List.of(latest));
+
+        var result = service.getNavHistory(code.value(), start, end);
+
+        assertEquals(LocalDate.of(2026, 1, 30), result.items().getLast().navDate());
+        verify(provider).fetchNavHistory(code, start, end);
+        verify(navs).upsertBatch(List.of(latest));
+    }
+
+    private NavPoint nav(FundCode code, LocalDate date, String value) {
+        return new NavPoint(code, date, new BigDecimal(value), new BigDecimal(value), null,
+                NavStatus.CONFIRMED, "eastmoney-public", clock.instant(), clock.instant());
     }
 }

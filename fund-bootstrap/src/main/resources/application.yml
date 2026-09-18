@@ -53,6 +53,16 @@ fund:
       cron: "0 30 3 * * MON-FRI"
   agent:
     enabled: false
+    routing:
+      # Mandatory safety rules always win; this bounded model call only advises on gray-area complexity.
+      semantic-enabled: ${FUND_AGENT_SEMANTIC_ROUTING_ENABLED:true}
+      # Dedicated Alibaba Cloud Model Studio model; it never replaces the primary chat model.
+      api-key: ${AI_ROUTER_API_KEY:}
+      base-url: ${AI_ROUTER_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      model: ${AI_ROUTER_MODEL:qwen3.8-flash}
+      semantic-timeout: 3s
+      connect-timeout: 1s
+      read-timeout: 3s
     agentops:
       enabled: ${AGENTOPS_PROMPT_ENABLED:false}
       base-url: ${AGENTOPS_BASE_URL:http://localhost:18080}

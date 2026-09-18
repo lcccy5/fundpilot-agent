@@ -26,7 +26,12 @@ public final class FundToolRouter {
         boolean catalystQuestion=containsAny(text,"利好","利空","催化","消息","新闻","公告","产业链","重仓股","持仓","为什么跌","下跌原因","上涨原因","风险事件");
         boolean explicitCombinedAnalysis=(documentQuestion&&containsAny(text,"指标","收益","回撤","波动","夏普","风险"))
                 ||(documentQuestion&&realtimeQuestion);
-        boolean sectorQuestion=futureQuestion&&(containsAny(text,"板块","行业","主题")||(!hasFundCode&&!text.contains("基金")));
+        boolean sectorSubject=containsAny(text,"板块","行业","主题");
+        // Explicit sector questions should always receive the scenario tool. Requiring formal
+        // forecast words made natural prompts such as “机器人板块最近咋样” expose no tools,
+        // leaving the model to invent textual pseudo tool calls.
+        boolean sectorQuestion=(sectorSubject&&!hasFundCode)
+                ||(futureQuestion&&!hasFundCode&&!text.contains("基金"));
         // 催化研究工具内部已完成持仓、产业链、公告和影响评估四步；
         // 这类问题不再同时暴露板块/文档工具，避免重复调用挤占审计步数。
         if(catalystQuestion&&!explicitCombinedAnalysis&&catalyst!=null)return new Object[]{catalyst};

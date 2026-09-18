@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, ReactNode, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "../components/AppShell";
 import {
   api,
@@ -21,6 +21,13 @@ type Fund = {
   dataSource?: string;
 };
 type Nav = { navDate: string; unitNav: number };
+type NavRange = "1m" | "3m" | "6m" | "1y";
+const NAV_RANGES: { value: NavRange; label: string }[] = [
+  { value: "1m", label: "近1个月" },
+  { value: "3m", label: "近3个月" },
+  { value: "6m", label: "近半年" },
+  { value: "1y", label: "近1年" },
+];
 type RunSummary = {
   run_id: string;
   status: string;
@@ -49,11 +56,16 @@ type RunSummary = {
   adminConsoleUrl?: string;
 };
 type Msg = {
+  id: string;
   role: "assistant" | "user";
   content: string;
   runId?: string;
   runSummary?: RunSummary;
   summaryUnavailable?: boolean;
+  activity?: {
+    status: "running" | "completed" | "failed";
+    steps: { text: string; failed?: boolean }[];
+  };
 };
 type Tab = "overview" | "watchlist" | "agent" | "insights" | "knowledge";
 const inline = (text: string) =>
@@ -195,82 +207,63 @@ function RichText({ text }: { text: string }) {
   return <div className="rich-text">{nodes}</div>;
 }
 
-/** Presents user-relevant trace facts while leaving accounting internals in the separate operator console. */
-function RunSummaryPanel({ message }: { message: Msg }) {
-  if (!message.runId) return null;
-  if (message.summaryUnavailable)
-    return <div className="run-summary pending">运行摘要暂不可用</div>;
-  if (!message.runSummary)
-    return <div className="run-summary pending">正在同步运行摘要…</div>;
-  const summary = message.runSummary,
-    accounting = summary.agentOps;
+/** Keeps each turn's live activity attached to that answer and collapsed by default. */
+function RunActivityPanel({ message }: { message: Msg }) {
+  if (!message.activity && !message.runId) return null;
+  const activity = message.activity,
+    summary = message.runSummary,
+    accounting = summary?.agentOps,
+    lastStep = activity?.steps.at(-1)?.text,
+    compactLabel =
+      activity?.status === "running"
+        ? `正在运行${lastStep ? ` · ${lastStep}` : ""}`
+        : activity?.status === "failed"
+          ? `运行未完成 · ${activity.steps.length} 个步骤`
+          : `运行已完成 · ${activity?.steps.length ?? 0} 个步骤${summary ? ` · ${summary.evidenceCount} 条证据` : ""}`;
   return (
-    <details className="run-summary">
-      <summary>
-        本次运行 · {summary.tool_call_count} 个工具 ·{" "}
-        {summary.evidenceCount} 条证据
-      </summary>
-      <div className="run-facts">
-        <span>
-          <b>模型</b>
-          {summary.model_name}
-        </span>
-        <span>
-          <b>Prompt</b>
-          {summary.prompt_version}
-        </span>
-        <span>
-          <b>数据截止</b>
-          {summary.dataCutoff ?? "以各证据为准"}
-        </span>
-        <span>
-          <b>运行耗时</b>
-          {summary.duration_ms == null ? "—" : `${summary.duration_ms} ms`}
-        </span>
-        <span>
-          <b>模型调用</b>
-          {accounting.available ? accounting.modelCallCount : "暂不可用"}
-        </span>
-        <span>
-          <b>实际 Token</b>
-          {accounting.available
-            ? (accounting.actualTokens ?? summary.total_tokens ?? "—")
-            : (summary.total_tokens ?? "—")}
-        </span>
-      </div>
-      {summary.tools.length > 0 && (
-        <div className="run-tools">
-          {summary.tools.map((tool, i) => (
-            <span key={`${tool.toolName}-${i}`}>
-              {tool.toolName} · {tool.status} · {tool.evidenceCount} 条证据
-            </span>
+    <details className={`agent-activity ${activity?.status ?? "completed"}`}>
+      <summary><span>{compactLabel}</span></summary>
+      {activity && activity.steps.length > 0 && (
+        <ol className="agent-trace">
+          {activity.steps.map((step, i) => (
+            <li
+              key={`${step.text}-${i}`}
+              className={step.failed ? "failed" : activity.status === "running" && i === activity.steps.length - 1 ? "running" : ""}
+            >
+              <span>{i + 1}. {step.text}</span>
+            </li>
           ))}
+        </ol>
+      )}
+      {message.summaryUnavailable && <div className="run-summary pending">运行摘要暂不可用</div>}
+      {message.runId && !message.summaryUnavailable && !summary && <div className="run-summary pending">正在同步运行摘要…</div>}
+      {summary && accounting && <div className="run-summary">
+        <div className="run-facts">
+          <span><b>模型</b>{summary.model_name}</span>
+          <span><b>Prompt</b>{summary.prompt_version}</span>
+          <span><b>数据截止</b>{summary.dataCutoff ?? "以各证据为准"}</span>
+          <span><b>运行耗时</b>{summary.duration_ms == null ? "—" : `${summary.duration_ms} ms`}</span>
+          <span><b>模型调用</b>{accounting.available ? accounting.modelCallCount : "暂不可用"}</span>
+          <span><b>实际 Token</b>{accounting.available ? (accounting.actualTokens ?? summary.total_tokens ?? "—") : (summary.total_tokens ?? "—")}</span>
         </div>
-      )}
-      <small>
-        AgentOps 账本：
-        {accounting.available
-          ? accounting.settled
-            ? "已结算"
-            : "处理中"
-          : "暂不可用"}
-        {summary.sources.length > 0 &&
-          ` · 来源 ${summary.sources.slice(0, 3).join("、")}`}
-      </small>
-      {summary.adminConsoleUrl && (
-        <a href={summary.adminConsoleUrl} target="_blank" rel="noreferrer">
-          管理员查看 AgentOps 详情 →
-        </a>
-      )}
+        {summary.tools.length > 0 && <div className="run-tools">
+          {summary.tools.map((tool, i) => <span key={`${tool.toolName}-${i}`}>{tool.toolName} · {tool.status} · {tool.evidenceCount} 条证据</span>)}
+        </div>}
+        <small>AgentOps 账本：{accounting.available ? accounting.settled ? "已结算" : "处理中" : "暂不可用"}{summary.sources.length > 0 && ` · 来源 ${summary.sources.slice(0, 3).join("、")}`}</small>
+        {summary.adminConsoleUrl && <a href={summary.adminConsoleUrl} target="_blank" rel="noreferrer">管理员查看 AgentOps 详情 →</a>}
+      </div>}
     </details>
   );
 }
 
-/** Builds a rolling one-year NAV window from the user''s local calendar date. */
-function currentNavWindow() {
+/** Builds the selected NAV window from the user's local calendar date. */
+function currentNavWindow(range: NavRange = "1y") {
   const end = new Date();
   const start = new Date(end);
-  start.setFullYear(start.getFullYear() - 1);
+  if (range === "1m") start.setMonth(start.getMonth() - 1);
+  if (range === "3m") start.setMonth(start.getMonth() - 3);
+  if (range === "6m") start.setMonth(start.getMonth() - 6);
+  if (range === "1y") start.setFullYear(start.getFullYear() - 1);
   const format = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   return { startDate: format(start), endDate: format(end) };
@@ -283,32 +276,62 @@ function chronologicalNavPoints(points: Nav[]) {
   );
 }
 
-function Chart({ points }: { points: Nav[] }) {
+async function requestNavPoints(fundCode: string, startDate: string, endDate: string) {
+  const response = await fetch(`${API}/api/v1/funds/${fundCode}/nav?startDate=${startDate}&endDate=${endDate}`);
+  const history = await readJsonResponse<{message?:string;msg?:string;data?:{items?:Nav[]};items?:Nav[]}>(response);
+  if (!response.ok) throw Error(history.message ?? history.msg ?? "历史净值暂不可用");
+  return chronologicalNavPoints((history.data ?? history).items ?? []);
+}
+
+/** Fills a missing current-period tail even when a broad historical query was cached earlier. */
+async function requestFreshNavPoints(fundCode: string, startDate: string, endDate: string) {
+  const points = await requestNavPoints(fundCode, startDate, endDate);
+  const latestDate = points.at(-1)?.navDate;
+  if (!latestDate || latestDate >= endDate) return points;
+  const nextDate = new Date(`${latestDate}T00:00:00`);
+  nextDate.setDate(nextDate.getDate() + 1);
+  const tailStart = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,"0")}-${String(nextDate.getDate()).padStart(2,"0")}`;
+  if (tailStart > endDate) return points;
+  const tail = await requestNavPoints(fundCode, tailStart, endDate);
+  return chronologicalNavPoints([...new Map([...points,...tail].map(point=>[point.navDate,point])).values()]);
+}
+
+function NavRangeSelector({ range, loading, onRangeChange }: { range: NavRange; loading: boolean; onRangeChange: (range: NavRange) => void }) {
+  return <div className="chart-ranges" aria-label="净值时间范围">{NAV_RANGES.map(option=><button type="button" key={option.value} className={range===option.value?'active':''} disabled={loading} aria-pressed={range===option.value} onClick={()=>onRangeChange(option.value)}>{option.label}</button>)}</div>;
+}
+
+function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; onRangeChange: (range: NavRange) => void }) {
   const p = useMemo(
     () =>
       points.filter(
         (_, i) =>
-          i % Math.max(1, Math.ceil(points.length / 80)) === 0 ||
+          i % Math.max(1, Math.ceil(points.length / 120)) === 0 ||
           i === points.length - 1,
       ),
     [points],
   );
   if (p.length < 2)
     return (
-      <div className="empty-chart">
-        查询基金后，这里会展示真实单位净值走势。
-      </div>
+      <><div className="empty-chart">{loading?'正在加载区间净值…':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
     );
   const v = p.map((x) => +x.unitNav),
     min = Math.min(...v),
     max = Math.max(...v),
     r = max - min || 1,
-    d = p
-      .map(
-        (x, i) =>
-          `${i ? "L" : "M"} ${((i / (p.length - 1)) * 100).toFixed(2)} ${(90 - ((+x.unitNav - min) / r) * 72).toFixed(2)}`,
-      )
-      .join(" "),
+    coordinates = p.map((x, i) => ({
+      x: (i / (p.length - 1)) * 100,
+      y: 90 - ((+x.unitNav - min) / r) * 72,
+    })),
+    d = coordinates.reduce((path, point, i, all) => {
+      if (i === 0) return `M ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+      const previous = all[i - 1], before = all[i - 2] ?? previous, after = all[i + 1] ?? point;
+      const c1x = previous.x + (point.x - before.x) / 6;
+      const lowerY = Math.min(previous.y, point.y), upperY = Math.max(previous.y, point.y);
+      const c1y = Math.max(lowerY, Math.min(upperY, previous.y + (point.y - before.y) / 6));
+      const c2x = point.x - (after.x - previous.x) / 6;
+      const c2y = Math.max(lowerY, Math.min(upperY, point.y - (after.y - previous.y) / 6));
+      return `${path} C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+    }, ""),
     change = ((v.at(-1)! - v[0]) / v[0]) * 100;
   return (
     <>
@@ -324,13 +347,17 @@ function Chart({ points }: { points: Nav[] }) {
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
       >
-        <path d={`M 0 100 ${d} L 100 100 Z`} fill="#2aa57e" opacity=".15" />
+        <defs><linearGradient id="nav-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2d78ed" stopOpacity=".22"/><stop offset="100%" stopColor="#2d78ed" stopOpacity=".025"/></linearGradient></defs>
+        {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
+        <path d={`${d} L 100 96 L 0 96 Z`} fill="url(#nav-area)" />
         <path
           d={d}
           fill="none"
-          stroke="#08745e"
-          strokeWidth="1.3"
+          stroke="#286fda"
+          strokeWidth="1.6"
           vectorEffect="non-scaling-stroke"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       </svg>
       <div className="dates">
@@ -338,60 +365,55 @@ function Chart({ points }: { points: Nav[] }) {
         <span>{p[Math.floor(p.length / 2)].navDate}</span>
         <span>{p.at(-1)?.navDate}</span>
       </div>
+      <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
     </>
   );
 }
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview"),
-    [code, setCode] = useState(() => typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('code')?.replace(/\D/g,'').slice(0,6) ?? ''),
+    [code, setCode] = useState(''),
     [fund, setFund] = useState<Fund | null>(null),
     [points, setPoints] = useState<Nav[]>([]),
+    [navRange, setNavRange] = useState<NavRange>("1y"),
+    [navLoading, setNavLoading] = useState(false),
     [notice, setNotice] = useState("实时研究环境已连接"),
     [loading, setLoading] = useState(false),
     [cid, setCid] = useState<string>(),
     [q, setQ] = useState("这只基金适合什么风险偏好的投资者？"),
     [messages, setMessages] = useState<Msg[]>([
       {
+        id: "welcome",
         role: "assistant",
         content:
           "你好，我是 FundPilot。输入基金代码，我会结合净值、历史表现与知识资料为你解读。",
       },
     ]),
     [agentLoading, setAgentLoading] = useState(false),
-    [steps, setSteps] = useState<string[]>([]);
+    [watchSaving, setWatchSaving] = useState(false),
+    [watchedCode, setWatchedCode] = useState<string>();
   const agentRef = useRef<HTMLElement>(null);
   /** Loads profile and NAV together so the detail view never mixes two funds. */
-  const sync = async (e?: FormEvent) => {
-    e?.preventDefault();
-    const id = code.padStart(6, "0");
-    const { startDate, endDate } = currentNavWindow();
+  const loadFund = useCallback(async (id: string) => {
+    const { startDate, endDate } = currentNavWindow("1y");
+    setCode(id);
     setLoading(true);
     setNotice("正在读取基金资料与历史净值…");
     try {
-      const [a, b] = await Promise.all([
+      const [a, navPoints] = await Promise.all([
           fetch(`${API}/api/v1/funds/${id}`),
-          fetch(
-            `${API}/api/v1/funds/${id}/nav?startDate=${startDate}&endDate=${endDate}`,
-          ),
+          requestFreshNavPoints(id, startDate, endDate),
         ]),
         profile = await readJsonResponse<{
           message?: string;
           msg?: string;
           data?: Fund;
-        }>(a),
-        history = await readJsonResponse<{
-          message?: string;
-          msg?: string;
-          data?: { items?: Nav[] };
-          items?: Nav[];
-        }>(b);
+        }>(a);
       if (!a.ok)
         throw Error(profile.message ?? profile.msg ?? "基金资料暂不可用");
-      if (!b.ok)
-        throw Error(history.message ?? history.msg ?? "历史净值暂不可用");
       const loadedFund=profile.data ?? (profile as Fund);
       setFund(loadedFund);
-      setPoints(chronologicalNavPoints((history.data ?? history).items ?? []));
+      setPoints(navPoints);
+      setNavRange("1y");
       setTab("overview");
       setNotice("已加载公开基金资料 · 数据仅供研究参考");
     } catch (x) {
@@ -399,17 +421,64 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }, []);
+  const changeNavRange = async (nextRange: NavRange) => {
+    if (!fund || nextRange === navRange || navLoading) return;
+    const previousRange = navRange;
+    const { startDate, endDate } = currentNavWindow(nextRange);
+    setNavRange(nextRange);
+    setNavLoading(true);
+    setNotice(`正在加载${NAV_RANGES.find(option=>option.value===nextRange)?.label}净值…`);
+    try {
+      setPoints(await requestFreshNavPoints(fund.fundCode, startDate, endDate));
+      setNotice(`已切换至${NAV_RANGES.find(option=>option.value===nextRange)?.label}走势`);
+    } catch (x) {
+      setNavRange(previousRange);
+      setNotice(x instanceof Error ? x.message : "区间切换失败");
+    } finally {
+      setNavLoading(false);
+    }
   };
+  const sync = async (e?: FormEvent) => {
+    e?.preventDefault();
+    await loadFund(code.padStart(6, "0"));
+  };
+  /** A watchlist research link opens with its fund details already loaded. */
+  useEffect(() => {
+    const requestedCode = new URLSearchParams(window.location.search)
+      .get("code")
+      ?.replace(/\D/g, "")
+      .slice(0, 6);
+    if (!requestedCode) return;
+    const timer = window.setTimeout(() => {
+      void loadFund(requestedCode.padStart(6, "0"));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadFund]);
   /** Sends the current fund identity with the question to avoid ambiguous AI research. */
   const ask = async (e: FormEvent) => {
     e.preventDefault();
     if (!q.trim() || agentLoading) return;
     const text = fund ? `研究对象：${fund.name}（${fund.fundCode}）\n问题：${q}` : q;
-    setMessages((x) => [...x, { role: "user", content: text }]);
+    const turnId = crypto.randomUUID();
+    setMessages((x) => [
+      ...x,
+      { id: `${turnId}-user`, role: "user", content: text },
+      { id: turnId, role: "assistant", content: "", activity: { status: "running", steps: [] } },
+    ]);
     setQ("");
     setAgentLoading(true);
-    setSteps([]);
     setNotice("FundPilot 正在分析…");
+    const updateTurn = (update: (message: Msg) => Msg) =>
+      setMessages((current) => current.map((message) => message.id === turnId ? update(message) : message));
+    const appendStep = (text: string, failed = false) =>
+      updateTurn((message) => ({
+        ...message,
+        activity: {
+          status: failed ? "failed" : (message.activity?.status ?? "running"),
+          steps: [...(message.activity?.steps ?? []), { text, failed }],
+        },
+      }));
     try {
       // Refresh once before protected calls so an expired browser session can recover.
       if (!hasFreshAccess() && !(await restoreSession()))
@@ -476,53 +545,33 @@ export default function Home() {
           const event = JSON.parse(raw),
             data = event.data;
           if (event.type === "run.started")
-            setSteps((x) => [...x, "Agent 运行已开始"]);
+            appendStep("Agent 运行已开始");
           else if (event.type === "tool.started")
-            setSteps((x) => [...x, `正在调用：${label(data.toolName)}`]);
+            appendStep(`正在调用：${label(data.toolName)}`);
           else if (event.type === "tool.completed")
-            setSteps((x) => [
-              ...x,
-              `${label(data.toolName)}完成 · ${data.durationMs}ms · ${data.evidenceIds?.length ?? 0} 条证据`,
-            ]);
+            appendStep(`${label(data.toolName)}完成 · ${data.durationMs}ms · ${data.evidenceIds?.length ?? 0} 条证据`);
           else if (event.type === "tool.failed")
-            setSteps((x) => [
-              ...x,
-              `${label(data.toolName)}失败 · ${data.errorCode}`,
-            ]);
+            appendStep(`${label(data.toolName)}失败 · ${data.errorCode}`, true);
           else if (event.type === "evidence.verifying")
-            setSteps((x) => [...x, "正在校验证据引用"]);
+            appendStep("正在校验证据引用");
           else if (event.type === "run.failed")
             throw Error(`${data.message}（${data.errorCode}）`);
           else if (event.type === "answer.delta") {
             const chunk = String(data ?? "");
-            setMessages((x) => {
-              if (streaming) {
-                const copy = [...x],
-                  last = copy.at(-1)!;
-                copy[copy.length - 1] = {
-                  role: "assistant",
-                  content: last.content + chunk,
-                };
-                return copy;
-              }
-              streaming = true;
-              return [...x, { role: "assistant", content: chunk }];
-            });
+            updateTurn((message) => ({ ...message, content: streaming ? message.content + chunk : chunk }));
+            streaming = true;
           } else if (event.type === "answer.completed") {
             const answer = data.answer,
               runId = String(event.runId ?? data.runId ?? "");
-            setMessages((x) => {
-              if (streaming) {
-                const copy = [...x];
-                copy[copy.length - 1] = {
-                  role: "assistant",
-                  content: answer,
-                  runId,
-                };
-                return copy;
-              }
-              return [...x, { role: "assistant", content: answer, runId }];
-            });
+            updateTurn((message) => ({
+              ...message,
+              content: answer,
+              runId,
+              activity: {
+                status: "completed",
+                steps: [...(message.activity?.steps ?? []), { text: "回答生成完成" }],
+              },
+            }));
             // Load the owner-scoped BFF projection after the answer is durable and accounting can settle.
             if (runId)
               void api<RunSummary>(
@@ -546,30 +595,45 @@ export default function Home() {
                     ),
                   ),
                 );
-            setSteps((x) => [...x, "回答生成完成"]);
             setNotice("分析完成 · 已进行证据校验");
           }
         }
       }
     } catch (x) {
       const detail = x instanceof Error ? x.message : "未知错误";
-      setSteps((y) => [...y, `执行失败：${detail}`]);
-      setMessages((y) => [
-        ...y,
-        { role: "assistant", content: `本次请求未完成：${detail}` },
-      ]);
+      updateTurn((message) => ({
+        ...message,
+        content: message.content || `本次请求未完成：${detail}`,
+        activity: {
+          status: "failed",
+          steps: [...(message.activity?.steps ?? []), { text: `执行失败：${detail}`, failed: true }],
+        },
+      }));
       setNotice(`Agent 请求失败 · ${detail}`);
     } finally {
       setAgentLoading(false);
     }
   };
-  /** Saves a guest watch item locally and directs the user to the full watchlist. */
-  const add = () => {
+  /** Saves directly to the signed-in watchlist, with device storage as a guest fallback. */
+  const add = async () => {
     if (!fund) return;
-    const codes=guestWatch();
-    if(codes.includes(fund.fundCode)){setNotice('这只基金已加入本设备自选');return;}
-    saveGuestWatch([...codes, fund.fundCode]);
-    setNotice('已加入本设备自选；登录后可同步到云端');
+    if(watchedCode===fund.fundCode){setNotice(`${fund.name} 已经在你的自选中`);return;}
+    setWatchSaving(true);
+    try{
+      type WatchGroup={groupId:string;displayName:string;items?:{fundCode:string|{value:string}}[]};
+      let groups=await api<WatchGroup[]>('/api/v1/watchlists');
+      if(!groups.length){const created=await api<WatchGroup>('/api/v1/watchlists',{method:'POST',body:JSON.stringify({name:'默认分组'})});groups=[created];}
+      const existing=groups.find(group=>group.items?.some(item=>(typeof item.fundCode==='string'?item.fundCode:item.fundCode.value)===fund.fundCode));
+      if(existing){setWatchedCode(fund.fundCode);setNotice(`${fund.name} 已经在“${existing.displayName}”中`);return;}
+      await api(`/api/v1/watchlists/${groups[0].groupId}/items`,{method:'POST',body:JSON.stringify({fundCode:fund.fundCode})});
+      setWatchedCode(fund.fundCode);
+      setNotice(`${fund.name} 已加入“${groups[0].displayName}”`);
+    }catch{
+      const codes=guestWatch();
+      saveGuestWatch([...codes,fund.fundCode]);
+      setWatchedCode(fund.fundCode);
+      setNotice(`${fund.name} 已保存在此设备；登录后可同步`);
+    }finally{setWatchSaving(false);}
   };
   const overview = (
     <>
@@ -615,7 +679,7 @@ export default function Home() {
           <p>NET ASSET VALUE</p>
           <h3>单位净值走势</h3>
           <small className="data-caption">净值变化不等同于实际持有收益；区间以图表日期为准。</small>
-          <Chart points={points} />
+          <Chart points={points} range={navRange} loading={navLoading} onRangeChange={changeNavRange} />
         </article>
         <article className="card profile">
           <p>FUND PROFILE</p>
@@ -643,7 +707,7 @@ export default function Home() {
             </div>
           </dl>
           <button onClick={() => sync()} disabled={loading}>{loading?'更新中…':'更新数据'}</button>
-          <button className="text-button" onClick={add}>加入自选</button>
+          <button className="text-button" onClick={()=>void add()} disabled={watchSaving}>{watchSaving?'正在加入…':watchedCode===fund?.fundCode?'✓ 已加入自选':'加入自选'}</button>
         </article>
       </section>
     </>
@@ -656,7 +720,7 @@ export default function Home() {
         <h2>数据洞察</h2>
         <div className="insight-grid">
           <div>
-            <small>近一年样本</small>
+            <small>当前区间样本</small>
             <b>{points.length || "—"} 个交易日</b>
           </div>
           <div>
@@ -676,7 +740,7 @@ export default function Home() {
             </b>
           </div>
         </div>
-        <Chart points={points} />
+        <Chart points={points} range={navRange} loading={navLoading} onRangeChange={changeNavRange} />
       </section>
     );
   if (tab === "knowledge")
@@ -713,33 +777,15 @@ export default function Home() {
             <h3>和你的基金研究助手聊聊</h3>
           </div>
         </div>
-        {steps.length > 0 && (
-          <ol className="agent-trace">
-            {steps.map((step, i) => (
-              <li
-                key={`${step}-${i}`}
-                className={
-                  step.startsWith("执行失败")
-                    ? "failed"
-                    : agentLoading && i === steps.length - 1
-                      ? "running"
-                      : ""
-                }
-              >
-                {i + 1}. {step}
-              </li>
-            ))}
-          </ol>
-        )}
         <div className="messages">
-          {messages.slice(-4).map((m, i) => (
-            <div key={i} className={m.role}>
+          {messages.map((m) => (
+            <div key={m.id} className={m.role}>
               <i>{m.role === "assistant" ? "F" : "你"}</i>
               <div className="bubble">
                 {m.role === "assistant" ? (
                   <>
-                    <RichText text={m.content} />
-                    <RunSummaryPanel message={m} />
+                    {m.content ? <RichText text={m.content} /> : <div className="answer-placeholder">正在分析并组织回答…</div>}
+                    <RunActivityPanel message={m} />
                   </>
                 ) : (
                   m.content

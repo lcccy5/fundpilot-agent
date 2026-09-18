@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jijing.fund.agent.api.EvidenceReference;
 import com.jijing.fund.agent.api.FundAgentEvent;
 import com.jijing.fund.agent.exception.AgentExecutionLimitException;
+import com.jijing.fund.agent.exception.AgentModeEscalationException;
 import com.jijing.fund.agent.port.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -60,7 +61,7 @@ public final class AgentExecutionTrace {
         String signature = toolName + ":" + sha256(redacted);
         int repeats = callSignatures.merge(signature, 1, Integer::sum);
         if (repeats > maxRepeatedCalls) throw new AgentExecutionLimitException("Repeated identical tool call blocked: " + toolName);
-        if (toolCalls.incrementAndGet() > maxToolCalls) throw new AgentExecutionLimitException("Maximum tool calls exceeded");
+        if (toolCalls.incrementAndGet() > maxToolCalls) throw new AgentModeEscalationException("Bounded ReAct tool budget exhausted");
         var invocation=new ToolInvocation(toolName, redacted, signature.substring(signature.indexOf(':')+1), Instant.now());
         events.accept(FundAgentEvent.of("tool.started",runId,Map.of("toolName",toolName,"arguments",redacted)));
         return invocation;

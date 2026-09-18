@@ -40,6 +40,12 @@ class SpringAiFundAgentServiceTest {
         String promptText="你是基金助手。";var prompt=new FundAgentPrompt("fund-agent-v1",promptText,AgentExecutionTrace.sha256(promptText));
         try(var service=new SpringAiFundAgentService(model,memory,repository,properties,router,new ObjectMapper().findAndRegisterModules(),Clock.systemUTC(),new FundAgentSafetyPolicy(),new FundAgentCitationPolicy(),new SimpleMeterRegistry(),prompt,new AgentModelDescriptor("test","fake-stream-model"))){var events=service.stream(new FundAgentRequest(conversation,"你好","req-stream")).collectList().block();assertThat(events).extracting(FundAgentEvent::type).containsExactly("run.started","answer.delta","evidence.verifying","answer.completed");assertThat(events.get(1).data()).isEqualTo("这是增量回答。");verify(repository).completeRun(eq("run-stream"),eq(1),eq(0),any(),anyLong(),any());}
     }
+    @Test void rejectsTextualPseudoToolCallsBeforeStreamingThemToTheUser(){
+        String conversation="00000000-0000-0000-0000-000000000005";AgentRuntimeRepository repository=mock(AgentRuntimeRepository.class);when(repository.conversationExists(conversation)).thenReturn(true);when(repository.startRun(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any())).thenReturn("run-protocol");FundToolRouter router=mock(FundToolRouter.class);when(router.toolsFor(anyString())).thenReturn(new Object[]{});ChatMemory memory=MessageWindowChatMemory.builder().chatMemoryRepository(new InMemoryChatMemoryRepository()).maxMessages(20).build();FundAgentProperties properties=FundAgentProperties.of(true,"fund-agent-v1","fund-tools-v1",6,1,5,Duration.ofSeconds(5),Duration.ofSeconds(1),2000,20);
+        ChatModel model=new ChatModel(){@Override public ChatResponse call(Prompt p){throw new UnsupportedOperationException();}@Override public Flux<ChatResponse>stream(Prompt p){return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage("{\"name\":\"sector_outlook\",\"arguments\":{\"sector\":\"机器人\"}}"))),ChatResponseMetadata.builder().model("fake-stream-model").build()));}};
+        String promptText="你是基金助手。";var prompt=new FundAgentPrompt("fund-agent-v1",promptText,AgentExecutionTrace.sha256(promptText));
+        try(var service=new SpringAiFundAgentService(model,memory,repository,properties,router,new ObjectMapper().findAndRegisterModules(),Clock.systemUTC(),new FundAgentSafetyPolicy(),new FundAgentCitationPolicy(),new SimpleMeterRegistry(),prompt,new AgentModelDescriptor("test","fake-stream-model"))){var events=service.stream(new FundAgentRequest(conversation,"机器人板块最近咋样","req-protocol")).collectList().block();assertThat(events).extracting(FundAgentEvent::type).containsExactly("run.started","run.failed");assertThat(events).noneMatch(event->"answer.delta".equals(event.type()));verify(repository).failRun(eq("run-protocol"),eq("FAILED"),eq("MODEL_UNAVAILABLE"),anyString(),eq(0),anyLong(),any());}
+    }
     @Test void reusesUnexpiredFactCardWithItsOriginalEvidence(){
         String conversation="00000000-0000-0000-0000-000000000003";Instant now=Instant.parse("2026-08-23T00:00:00Z");
         AgentRuntimeRepository repository=mock(AgentRuntimeRepository.class);when(repository.conversationExists(conversation)).thenReturn(true);when(repository.startRun(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any())).thenReturn("run-fact");
@@ -71,6 +77,51 @@ class SpringAiFundAgentServiceTest {
             assertThat(response.answer()).contains("普通问答使用有限 ReAct");
             verify(runs).submit(any());
             verify(repository,never()).startRun(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any());
+        }
+    }
+    @Test void executionLimitPromotesAuthenticatedBoundedRunOnce(){
+        String conversation="00000000-0000-0000-0000-000000000006";
+        var userId=new com.jijing.fund.domain.identity.UserId("00000000-0000-0000-0000-000000000001");
+        var actor=new com.jijing.fund.domain.identity.AuthenticatedUser(userId,Set.of(com.jijing.fund.domain.identity.UserRole.USER),"s");
+        AgentRuntimeRepository repository=mock(AgentRuntimeRepository.class);
+        when(repository.conversationExists(conversation,userId)).thenReturn(true);
+        when(repository.startRun(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any())).thenReturn("bounded-run");
+        FundToolRouter router=mock(FundToolRouter.class);when(router.toolsFor(anyString())).thenReturn(new Object[]{});
+        ChatMemory memory=MessageWindowChatMemory.builder().chatMemoryRepository(new InMemoryChatMemoryRepository()).maxMessages(20).build();
+        FundAgentProperties properties=FundAgentProperties.of(true,"fund-agent-v1","fund-tools-v1",4,1,5,Duration.ofSeconds(5),Duration.ofSeconds(1),2000,20);
+        ChatModel model=prompt->{throw new com.jijing.fund.agent.exception.AgentModeEscalationException("Bounded ReAct tool budget exhausted");};
+        AgentRunUseCase runs=mock(AgentRunUseCase.class);
+        when(runs.submit(any())).thenReturn(new AgentRunView("plan-run",conversation,userId.value(),"PLAN_RUNNING","PLAN_AND_EXECUTE","RUNTIME_BUDGET_ESCALATION","plan-1",1));
+        var prompt=new FundAgentPrompt("fund-agent-v1","你是基金助手。",AgentExecutionTrace.sha256("你是基金助手。"));
+        try(var service=new SpringAiFundAgentService(model,memory,repository,properties,router,new ObjectMapper().findAndRegisterModules(),Clock.systemUTC(),new FundAgentSafetyPolicy(),new FundAgentCitationPolicy(),new SimpleMeterRegistry(),prompt,new AgentModelDescriptor("test","fake"),new com.jijing.fund.agent.routing.ExecutionModeRouter(),runs)){
+            FundAgentResponse response=service.chat(new FundAgentRequest(conversation,"帮我看看 000001", "req-limit",actor));
+            assertThat(response.runId()).isEqualTo("plan-run");
+            assertThat(response.answer()).contains("自动升级");
+            verify(repository).failRun(eq("bounded-run"),eq("REJECTED"),eq("AGENT_MODE_ESCALATION"),anyString(),eq(0),anyLong(),any());
+            verify(repository).recordRouteDecision(eq("bounded-run"),eq(userId.value()),argThat(d->d.mode()==com.jijing.fund.agent.routing.ExecutionMode.BOUNDED_REACT),any());
+            var command=org.mockito.ArgumentCaptor.forClass(AgentRunCommand.class);
+            verify(runs,times(1)).submit(command.capture());
+            assertThat(command.getValue().requestId()).isEqualTo("req-limit-escalated");
+            assertThat(command.getValue().routeDecision().matchedRule()).isEqualTo("RUNTIME_BUDGET_ESCALATION");
+            verify(repository).linkEscalatedRun("plan-run","bounded-run");
+        }
+    }
+    @Test void repeatedCallLimitDoesNotPromoteInfrastructureOrLoopFailure(){
+        String conversation="00000000-0000-0000-0000-000000000007";
+        var userId=new com.jijing.fund.domain.identity.UserId("00000000-0000-0000-0000-000000000001");
+        var actor=new com.jijing.fund.domain.identity.AuthenticatedUser(userId,Set.of(com.jijing.fund.domain.identity.UserRole.USER),"s");
+        AgentRuntimeRepository repository=mock(AgentRuntimeRepository.class);when(repository.conversationExists(conversation,userId)).thenReturn(true);when(repository.startRun(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any())).thenReturn("bounded-loop-run");
+        FundToolRouter router=mock(FundToolRouter.class);when(router.toolsFor(anyString())).thenReturn(new Object[]{});
+        ChatMemory memory=MessageWindowChatMemory.builder().chatMemoryRepository(new InMemoryChatMemoryRepository()).maxMessages(20).build();
+        FundAgentProperties properties=FundAgentProperties.of(true,"fund-agent-v1","fund-tools-v1",4,1,5,Duration.ofSeconds(5),Duration.ofSeconds(1),2000,20);
+        ChatModel model=prompt->{throw new com.jijing.fund.agent.exception.AgentExecutionLimitException("Repeated identical tool call blocked");};
+        AgentRunUseCase runs=mock(AgentRunUseCase.class);
+        var prompt=new FundAgentPrompt("fund-agent-v1","你是基金助手。",AgentExecutionTrace.sha256("你是基金助手。"));
+        try(var service=new SpringAiFundAgentService(model,memory,repository,properties,router,new ObjectMapper().findAndRegisterModules(),Clock.systemUTC(),new FundAgentSafetyPolicy(),new FundAgentCitationPolicy(),new SimpleMeterRegistry(),prompt,new AgentModelDescriptor("test","fake"),new com.jijing.fund.agent.routing.ExecutionModeRouter(),runs)){
+            org.assertj.core.api.Assertions.assertThatThrownBy(()->service.chat(new FundAgentRequest(conversation,"帮我看看 000001","req-loop",actor)))
+                    .isInstanceOf(com.jijing.fund.agent.exception.AgentExecutionLimitException.class);
+            verify(repository).failRun(eq("bounded-loop-run"),eq("REJECTED"),eq("AGENT_EXECUTION_LIMIT"),anyString(),eq(0),anyLong(),any());
+            verifyNoInteractions(runs);
         }
     }
 }

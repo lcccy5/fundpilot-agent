@@ -42,7 +42,9 @@ public class FundQueryApplicationService implements FundQueryUseCase {
             throw new InvalidFundQueryException("startDate and endDate are required and startDate must not be after endDate");
         }
         var code = parseCode(fundCode);
-        var points = cache.getHistory(code, startDate, endDate).orElseGet(() -> loadHistory(code, startDate, endDate));
+        var points = cache.getHistory(code, startDate, endDate)
+                .filter(cached -> !hasStaleRecentTail(cached, endDate))
+                .orElseGet(() -> loadHistory(code, startDate, endDate));
         if (fundRepository.findByCode(code).isEmpty()) throw new FundNotFoundException(fundCode);
         var items = new ArrayList<NavPointResult>(points.size());
         for (int i = 0; i < points.size(); i++) {
@@ -71,16 +73,29 @@ public class FundQueryApplicationService implements FundQueryUseCase {
 
     private java.util.List<com.jijing.fund.domain.model.NavPoint> loadHistory(FundCode code, LocalDate start, LocalDate end) {
         var points = navRepository.findHistory(code, start, end);
-        if (points.isEmpty()) {
+        boolean recentWindow = !end.isBefore(LocalDate.now(clock).minusDays(1));
+        if (points.isEmpty() || recentWindow) {
             loadProfile(code);
-            points = provider.fetchNavHistory(code, start, end);
-            if (!points.isEmpty()) {
-                navRepository.upsertBatch(points);
-                fundRepository.incrementDataRevision(code, points.getLast().navDate());
+            var fetched = provider.fetchNavHistory(code, start, end);
+            if (!fetched.isEmpty()) {
+                navRepository.upsertBatch(fetched);
+                LocalDate latest = fetched.stream().map(NavPoint::navDate).max(LocalDate::compareTo).orElseThrow();
+                fundRepository.incrementDataRevision(code, latest);
+                var reloaded = navRepository.findHistory(code, start, end);
+                points = reloaded.isEmpty() ? fetched : reloaded;
             }
         }
         cache.putHistory(code, start, end, points);
         return points;
+    }
+
+    /** Rejects cached current-period results whose tail is clearly behind the requested date. */
+    private boolean hasStaleRecentTail(java.util.List<NavPoint> points, LocalDate end) {
+        LocalDate today = LocalDate.now(clock);
+        if (end.isBefore(today.minusDays(1))) return false;
+        if (points.isEmpty()) return true;
+        LocalDate latest = points.stream().map(NavPoint::navDate).max(LocalDate::compareTo).orElse(LocalDate.MIN);
+        return latest.isBefore(today.minusDays(3));
     }
 
     private FundProfileResult toResult(FundProfile profile) {

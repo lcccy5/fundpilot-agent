@@ -27,6 +27,18 @@ public class JdbcAgentRuntimeRepository implements AgentRuntimeRepository {
                 INSERT INTO agent_run(run_id,conversation_id,request_id,prompt_version,prompt_hash,tool_schema_version,model_provider,model_name,status,started_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?)
                 """,runId,conversationId,requestId==null?"unknown":requestId,promptVersion,promptHash,toolSchemaVersion,provider,model,"RUNNING",ts(startedAt));return runId;}
+    @Override public void recordRouteDecision(String runId,String ownerUserId,com.jijing.fund.agent.routing.RouteDecision decision,Instant createdAt){
+        if(decision==null)return;
+        jdbc.update("""
+                INSERT INTO agent_route_decision(decision_id,run_id,owner_user_id,execution_mode,direct_variant,router_version,features_json,matched_rule,model_suggestion,override_reason,created_at)
+                VALUES(?,?,?,?,?,?,CAST(? AS JSON),?,?,?,?)
+                """,UUID.randomUUID().toString(),runId,ownerUserId,decision.mode().name(),decision.directVariant()==null?null:decision.directVariant().name(),decision.routerVersion(),json(decision.features()),decision.matchedRule(),truncate(decision.modelSuggestion(),32),truncate(decision.overrideReason(),128),ts(createdAt));
+        jdbc.update("UPDATE agent_run SET execution_mode=?,router_version=?,route_reason=? WHERE run_id=?",
+                decision.mode().name(),decision.routerVersion(),decision.matchedRule(),runId);
+    }
+    @Override public void linkEscalatedRun(String childRunId,String parentRunId){
+        jdbc.update("UPDATE agent_run SET parent_run_id=? WHERE run_id=? AND parent_run_id IS NULL",parentRunId,childRunId);
+    }
     @Override public void completeRun(String runId,int rounds,int calls,TokenUsage usage,long duration,Instant completed){jdbc.update("""
             UPDATE agent_run SET status='SUCCEEDED',model_rounds=?,tool_call_count=?,prompt_tokens=?,completion_tokens=?,total_tokens=?,completed_at=?,duration_ms=? WHERE run_id=?
             """,
@@ -77,5 +89,6 @@ public class JdbcAgentRuntimeRepository implements AgentRuntimeRepository {
     private List<EvidenceReference> evidence(String value){try{return mapper.readValue(value,mapper.getTypeFactory().constructCollectionType(List.class,EvidenceReference.class));}catch(Exception ex){return List.of();}}
     private List<String> strings(String value){try{return mapper.readValue(value,mapper.getTypeFactory().constructCollectionType(List.class,String.class));}catch(Exception ex){return List.of();}}
     private String json(Object value){try{return mapper.writeValueAsString(value);}catch(Exception ex){return "[]";}}
+    private String truncate(String value,int max){return value==null?null:value.length()<=max?value:value.substring(0,max);}
     private Timestamp ts(Instant value){return Timestamp.from(value);}
 }

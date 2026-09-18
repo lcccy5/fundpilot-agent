@@ -6,4 +6,15 @@ public record RouteFeatures(int fundCount,int goalCount,int estimatedToolCalls,i
                             boolean freshMarketDataRequired,boolean reportRequested,
                             boolean sideEffectRequested,boolean approvalRequired,
                             boolean backgroundRequested,boolean adaptiveResearchRequired,
-                            boolean clarificationRequired) {}
+                            boolean clarificationRequired,int semanticGoalCount,
+                            int semanticCapabilityCount,int semanticEstimatedStages,
+                            boolean semanticDependencies,boolean semanticCrossSourceVerification,
+                            boolean semanticIterativeResearch) {
+    public RouteFeatures withSemanticAdvice(RouteAdvice advice){
+        return new RouteFeatures(fundCount,goalCount,estimatedToolCalls,estimatedStages,personalDataRequired,
+                documentResearchRequired,freshMarketDataRequired,reportRequested,sideEffectRequested,
+                approvalRequired,backgroundRequested,adaptiveResearchRequired,clarificationRequired,
+                advice.goals().size(),advice.requiredCapabilities().size(),advice.estimatedStages(),
+                advice.hasDependencies(),advice.crossSourceVerificationRequired(),advice.iterativeResearchRequired());
+    }
+}
