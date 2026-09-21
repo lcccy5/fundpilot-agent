@@ -3,6 +3,7 @@ package com.jijing.fund.agent.orchestration;
 import com.jijing.fund.agent.api.AgentConversationState;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.regex.Pattern;
 
 /** Deterministically updates the conversation note without summarizing model output. */
 final class ConversationStateResolver {
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Pattern FUND_CODE = Pattern.compile("(?<!\\d)(\\d{6})(?!\\d)");
     private static final Pattern ISO_DATE = Pattern.compile("(20\\d{2})[-/年](\\d{1,2})[-/月](\\d{1,2})(?:日)?");
 
@@ -22,8 +24,9 @@ final class ConversationStateResolver {
         while (funds.size() > 8) funds.remove(funds.iterator().next());
 
         List<LocalDate> dates = findDates(message);
-        LocalDate start = dates.size() >= 2 ? dates.get(0) : base.periodStart();
-        LocalDate end = dates.size() >= 2 ? dates.get(1) : base.periodEnd();
+        DateRange relative = dates.size() >= 2 ? null : relativePeriod(message, now);
+        LocalDate start = dates.size() >= 2 ? dates.get(0) : relative != null ? relative.start() : base.periodStart();
+        LocalDate end = dates.size() >= 2 ? dates.get(1) : relative != null ? relative.end() : base.periodEnd();
         String active = explicitFunds.isEmpty() ? base.activeFund() : explicitFunds.get(explicitFunds.size() - 1);
         String topic = topic(message, base.activeTopic());
         return new AgentConversationState(base.conversationId(), active, List.copyOf(funds), start, end, topic, now);
@@ -50,8 +53,8 @@ final class ConversationStateResolver {
         String text = message == null ? "" : message;
         if (containsAny(text, "经理", "基金公司", "基金类型", "基本资料")) return FundMemoryCategory.PROFILE.name();
         if (containsAny(text, "实时", "行情", "价格", "估值")) return FundMemoryCategory.REALTIME.name();
-        if (containsAny(text, "回撤", "收益", "波动", "夏普", "指标")) return FundMemoryCategory.METRICS.name();
-        if (text.contains("净值")) return FundMemoryCategory.NAV.name();
+        if (containsAny(text, "回撤", "收益", "收益率", "波动", "夏普", "指标", "表现")) return FundMemoryCategory.METRICS.name();
+        if (containsAny(text, "净值", "走势")) return FundMemoryCategory.NAV.name();
         if (containsAny(text, "持仓", "重仓")) return FundMemoryCategory.HOLDINGS.name();
         if (containsAny(text, "利好", "利空", "催化", "风险", "行业")) return FundMemoryCategory.MARKET_SIGNALS.name();
         if (containsAny(text, "季报", "年报", "公告", "文档")) return FundMemoryCategory.DOCUMENTS.name();
@@ -62,4 +65,18 @@ final class ConversationStateResolver {
         for (String term : terms) if (text.contains(term)) return true;
         return false;
     }
+
+    private DateRange relativePeriod(String message, Instant now) {
+        String text = message == null ? "" : message;
+        LocalDate end = now.atZone(BUSINESS_ZONE).toLocalDate();
+        if (text.contains("今年")) return new DateRange(end.withDayOfYear(1), end);
+        if (containsAny(text, "近一年", "过去一年", "最近一年")) return new DateRange(end.minusYears(1), end);
+        if (containsAny(text, "近半年", "过去半年", "最近半年")) return new DateRange(end.minusMonths(6), end);
+        if (containsAny(text, "近三个月", "近3个月", "过去三个月", "最近三个月")) return new DateRange(end.minusMonths(3), end);
+        if (containsAny(text, "近一个月", "近1个月", "过去一个月", "最近一个月")) return new DateRange(end.minusMonths(1), end);
+        if (containsAny(text, "近30天", "过去30天", "最近30天")) return new DateRange(end.minusDays(30), end);
+        return null;
+    }
+
+    private record DateRange(LocalDate start, LocalDate end) {}
 }

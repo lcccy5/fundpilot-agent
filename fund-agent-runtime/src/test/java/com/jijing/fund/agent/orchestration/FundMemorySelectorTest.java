@@ -22,7 +22,8 @@ class FundMemorySelectorTest {
                 card("profile-2","get_fund_profile","110022","{\"manager\":\"李四\"}")),3,1200);
         assertThat(selected.fundCount()).isEqualTo(1);
         assertThat(selected.cardIds()).containsExactly("profile-1");
-        assertThat(selected.prompt()).contains("fund=000001","张三").doesNotContain("returnRate","李四");
+        assertThat(selected.prompt()).contains("fund=000001","张三","observedAt","validUntil","evidenceIds")
+                .doesNotContain("returnRate","李四");
     }
 
     @Test void assemblesMultipleRequestedSectionsIntoOneCardPerFund() {
@@ -50,6 +51,32 @@ class FundMemorySelectorTest {
         var wrong=new AgentFactCard("wrong","c","r","calculate_fund_metrics","000001",List.of(evidence),"{\"maxDrawdown\":-0.1}",now,now.plusSeconds(60));
         var selected=selector.select("它同期的最大回撤呢？",state,List.of(wrong),3,1200);
         assertThat(selected.cardIds()).isEmpty();
+    }
+
+    @Test void aLargeNavCardCanBeReusedUnderATightPromptBudget() throws Exception {
+        var data=new ObjectMapper().createObjectNode().put("fundCode","000001");
+        var items=data.putArray("items");
+        for(int i=0;i<180;i++)items.addObject().put("navDate",LocalDate.of(2026,1,1).plusDays(i).toString())
+                .put("unitNav",1+i/1000D).put("accumulatedNav",2+i/1000D);
+        var state=new AgentConversationState("c","000001",List.of("000001"),null,null,"NAV",now);
+        var selected=selector.select("它最新的累计净值是多少？",state,List.of(
+                card("nav","get_fund_nav_history","000001",data.toString())),3,500);
+        assertThat(selected.cardIds()).containsExactly("nav");
+        assertThat(selected.tokens()).isLessThanOrEqualTo(500);
+        assertThat(selected.prompt()).contains("2026-06-29").doesNotContain("2026-03-01");
+    }
+
+    @Test void newestValueWinsAndExpiredMemoryCannotLeakIntoThePrompt() {
+        var state=new AgentConversationState("c","000001",List.of("000001"),null,null,"PROFILE",now);
+        var old=new AgentFactCard("old","c","run-1","get_fund_profile","000001",List.of(),
+                "{\"manager\":\"旧经理\"}",now.minusSeconds(600),now.plusSeconds(600));
+        var current=new AgentFactCard("current","c","run-2","get_fund_profile","000001",List.of(),
+                "{\"manager\":\"新经理\"}",now.minusSeconds(60),now.plusSeconds(600));
+        var expired=new AgentFactCard("expired","c","run-3","get_fund_profile","000001",List.of(),
+                "{\"manager\":\"过期经理\"}",now.minusSeconds(1200),now.minusSeconds(1));
+        var selected=selector.select("它的基金经理是谁？",state,List.of(old,current,expired),3,1200);
+        assertThat(selected.cardIds()).containsExactly("current");
+        assertThat(selected.prompt()).contains("新经理").doesNotContain("旧经理","过期经理");
     }
 
     private AgentFactCard card(String id,String tool,String subject,String data) {

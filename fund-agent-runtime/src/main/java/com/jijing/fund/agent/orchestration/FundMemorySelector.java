@@ -20,8 +20,12 @@ import java.util.Set;
 /** Selects relevant per-fund memory files and assembles one compact card per fund. */
 final class FundMemorySelector {
     private final ObjectMapper mapper;
+    private final FundMemoryProjector projector;
 
-    FundMemorySelector(ObjectMapper mapper) { this.mapper = Objects.requireNonNull(mapper); }
+    FundMemorySelector(ObjectMapper mapper) {
+        this.mapper = Objects.requireNonNull(mapper);
+        this.projector = new FundMemoryProjector(mapper);
+    }
 
     Selection select(String question, AgentConversationState state, List<AgentFactCard> candidates,
                      int maxFunds, int tokenBudget) {
@@ -31,6 +35,7 @@ final class FundMemorySelector {
         Set<String> subjects = subjects(question, state);
 
         List<AgentFactCard> eligible = candidates.stream()
+                .filter(card -> state == null || state.updatedAt() == null || card.expiresAt().isAfter(state.updatedAt()))
                 .filter(card -> categories.contains(FundMemoryCategory.fromTool(card.toolName())))
                 .filter(card -> subjects.isEmpty() || cardSubjects(card).stream().anyMatch(subjects::contains))
                 .filter(card -> periodCompatible(card, state))
@@ -58,8 +63,14 @@ final class FundMemorySelector {
             ObjectNode sections = mapper.createObjectNode();
             List<AgentFactCard> sourceCards = new ArrayList<>();
             for (Map.Entry<FundMemoryCategory, AgentFactCard> section : folder.getValue().entrySet()) {
-                JsonNode data = parse(section.getValue().dataJson());
-                sections.set(section.getKey().name().toLowerCase(Locale.ROOT), data);
+                AgentFactCard card = section.getValue();
+                JsonNode data = projector.project(section.getKey(), parse(card.dataJson()), question);
+                ObjectNode memoryValue = mapper.createObjectNode();
+                memoryValue.put("observedAt", card.createdAt().toString());
+                memoryValue.put("validUntil", card.expiresAt().toString());
+                memoryValue.set("evidenceIds", mapper.valueToTree(card.evidenceIds()));
+                memoryValue.set("value", data);
+                sections.set(section.getKey().name().toLowerCase(Locale.ROOT), memoryValue);
                 sourceCards.add(section.getValue());
             }
             String line = "FUND_MEMORY fund=" + folder.getKey() + " sections=" + sections + "\n";
@@ -120,16 +131,21 @@ final class FundMemorySelector {
         EnumSet<FundMemoryCategory> values = EnumSet.noneOf(FundMemoryCategory.class);
         if (containsAny(text, "经理", "基金公司", "基金类型", "基本资料")) values.add(FundMemoryCategory.PROFILE);
         if (containsAny(text, "实时", "行情", "价格", "估值")) values.add(FundMemoryCategory.REALTIME);
-        if (containsAny(text, "回撤", "收益", "波动", "夏普", "指标")) values.add(FundMemoryCategory.METRICS);
-        if (containsAny(text, "净值")) values.add(FundMemoryCategory.NAV);
+        if (containsAny(text, "回撤", "收益", "收益率", "波动", "夏普", "指标", "表现")) values.add(FundMemoryCategory.METRICS);
+        if (containsAny(text, "净值", "走势")) values.add(FundMemoryCategory.NAV);
         if (containsAny(text, "持仓", "重仓")) values.add(FundMemoryCategory.HOLDINGS);
         if (containsAny(text, "利好", "利空", "催化", "风险", "行业")) values.add(FundMemoryCategory.MARKET_SIGNALS);
         if (containsAny(text, "季报", "年报", "公告", "文档")) values.add(FundMemoryCategory.DOCUMENTS);
-        if (values.isEmpty() && state != null && state.activeTopic() != null) {
+        if (values.isEmpty() && state != null && state.activeTopic() != null && referencesContext(text)) {
             try { values.add(FundMemoryCategory.valueOf(state.activeTopic())); }
             catch (IllegalArgumentException ignored) { /* Unknown topics do not broaden retrieval. */ }
         }
         return values;
+    }
+
+    private boolean referencesContext(String text) {
+        return containsAny(text, "它", "这只", "这些", "这几只", "两只", "刚才", "上面", "前面",
+                "同期", "同一", "继续", "再", "那个", "其中", "分别");
     }
 
     private List<String> cardSubjects(AgentFactCard card) {

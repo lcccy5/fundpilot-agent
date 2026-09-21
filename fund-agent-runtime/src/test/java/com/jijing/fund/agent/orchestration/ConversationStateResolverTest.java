@@ -27,4 +27,21 @@ class ConversationStateResolverTest {
         assertThat(state.periodStart()).isEqualTo(previous.periodStart());
         assertThat(state.activeTopic()).isEqualTo("METRICS");
     }
+
+    @Test void resolvesRelativePeriodInTheBusinessTimezone() {
+        Instant now=Instant.parse("2026-09-18T16:30:00Z");
+        var state=new ConversationStateResolver().update(AgentConversationState.empty("conversation"),
+                "看看000001近三个月的收益表现",now);
+        assertThat(state.periodStart()).isEqualTo(LocalDate.of(2026,6,19));
+        assertThat(state.periodEnd()).isEqualTo(LocalDate.of(2026,9,19));
+        assertThat(state.activeTopic()).isEqualTo("METRICS");
+    }
+
+    @Test void explicitDatesTakePrecedenceOverRelativeWords() {
+        Instant now=Instant.parse("2026-09-19T02:00:00Z");
+        var state=new ConversationStateResolver().update(AgentConversationState.empty("conversation"),
+                "虽然是近一年，但请按2025年1月1日至2025年12月31日计算",now);
+        assertThat(state.periodStart()).isEqualTo(LocalDate.of(2025,1,1));
+        assertThat(state.periodEnd()).isEqualTo(LocalDate.of(2025,12,31));
+    }
 }
