@@ -33,7 +33,9 @@ public class FundAgentConfiguration {
         return new FundAgentPrompt(properties.promptVersion(),content,AgentExecutionTrace.sha256(content));
     }
     /** Keeps the original classpath prompt path when AgentOps prompt resolution is disabled. */
-    @Bean @ConditionalOnMissingBean(FundAgentPromptResolver.class)
+    @Bean
+    @ConditionalOnProperty(prefix="fund.agent",name="enabled",havingValue="true")
+    @ConditionalOnMissingBean(FundAgentPromptResolver.class)
     FundAgentPromptResolver localFundAgentPromptResolver(FundAgentPrompt prompt){return request->ResolvedFundAgentPrompt.local(prompt);}
     @Bean AgentModelDescriptor agentModelDescriptor(Environment environment){
         return new AgentModelDescriptor(environment.getProperty("spring.ai.model.chat","unknown"),
