@@ -332,23 +332,23 @@ function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav
           {change.toFixed(2)}% · 区间单位净值变化
         </span>
       </div>
-      <div className="chart-plot">
-        <div className="chart-y" aria-hidden="true">
-          <span style={{ top: "18%" }}>{chart.max.toFixed(4)}</span>
-          <span style={{ top: "54%" }}>{((chart.max + chart.min) / 2).toFixed(4)}</span>
-          <span style={{ top: "90%" }}>{chart.min.toFixed(4)}</span>
+      <div style={{ display: "grid", gridTemplateColumns: "72px minmax(0,1fr)", columnGap: 8 }}>
+        <div style={{ position: "relative", height: 220, color: "#7b8798", fontSize: 12 }} aria-hidden="true">
+          <span style={{ position: "absolute", top: "18%", right: 0, transform: "translateY(-50%)" }}>{chart.max.toFixed(4)}</span>
+          <span style={{ position: "absolute", top: "54%", right: 0, transform: "translateY(-50%)" }}>{((chart.max + chart.min) / 2).toFixed(4)}</span>
+          <span style={{ position: "absolute", top: "90%", right: 0, transform: "translateY(-50%)" }}>{chart.min.toFixed(4)}</span>
         </div>
         <svg className="real-chart" viewBox="0 0 100 100" preserveAspectRatio="none" onPointerMove={locate} onPointerLeave={() => setHover(null)}>
           {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
           {chart.segments.map(segment => <path key={segment} d={segment} fill="none" stroke="#286fda" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />)}
         </svg>
       </div>
-      <div className="dates chart-dates">
-        <span style={{ left: `${p[0].x}%` }}>{p[0].navDate}</span>
-        {middle !== p[0] && middle !== p.at(-1) && <span style={{ left: `${middle.x}%` }}>{middle.navDate}</span>}
-        <span style={{ left: `${p.at(-1)?.x ?? 100}%` }}>{p.at(-1)?.navDate}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", marginLeft: 80, marginTop: 6, color: "#7b8798", fontSize: 12 }}>
+        <span>{p[0].navDate}</span>
+        {middle !== p[0] && middle !== p.at(-1) ? <span>{middle.navDate}</span> : <span />}
+        <span>{p.at(-1)?.navDate}</span>
       </div>
-      {chart.gaps.length > 0 && <p className="chart-gap-note">有 {chart.gaps.length} 段间隔超过一个周末。曲线只连接已公布的净值，没有把空档补成数据。</p>}
+      {chart.gaps.length > 0 && <p style={{ margin: "6px 0 0 80px", color: "#8a93a6", fontSize: 12, lineHeight: 1.5 }}>有 {chart.gaps.length} 段间隔超过一个周末。曲线只连接已公布的净值，没有把空档补成数据。</p>}
       {hover != null && p[hover] && <div className="chart-readout">{p[hover].navDate} · 单位净值 {Number(p[hover].unitNav).toFixed(4)}</div>}
       <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
     </>
