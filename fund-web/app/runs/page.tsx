@@ -2,6 +2,7 @@
 import {FormEvent,useCallback,useEffect,useState} from 'react';
 import AppShell from '../../components/AppShell';
 import {api} from '../../lib/session';
+import {approvalFromEvent,eventReason} from '../../lib/polish.mjs';
 
 type Task={taskKey:string;capabilityType:string;status:string};
 type Plan={planId:string;status:string;tasks:Task[]};
@@ -17,7 +18,7 @@ const taskName:Record<string,string>={FUND_METRICS_QUERY:'计算指标',FUND_COM
 export default function RunsPage(){
   const[message,setMessage]=useState('结合我的持仓做一份分析与报告');
   const[run,setRun]=useState<Run|null>(null);const[plan,setPlan]=useState<Plan|null>(null);const[events,setEvents]=useState<Ev[]>([]);const[report,setReport]=useState<ResearchReport|null>(null);const[loading,setLoading]=useState(false);
-  const[notice,setNotice]=useState('提交研究后会自动更新进度。');
+  const[notice,setNotice]=useState('提交研究后会自动更新进度。');const[cancelling,setCancelling]=useState(false);
   /** Fetches the owned run, plan, and event history as one user-visible progress snapshot. */
   const refresh=useCallback(async(id:string)=>{
     const nextRun=await api<Run>(`/api/v1/agent/runs/${id}`);setRun(nextRun);
@@ -34,16 +35,19 @@ export default function RunsPage(){
   /** Creates a new asynchronous research run and starts polling its progress. */
   const submit=async(e:FormEvent)=>{e.preventDefault();if(!message.trim())return setNotice('请描述希望研究的问题');setLoading(true);setReport(null);try{const created=await api<Run>('/api/v1/agent/runs',{method:'POST',body:JSON.stringify({message})});window.localStorage.setItem('fundpilot:lastResearchRunId',created.runId);setNotice('研究任务已创建，正在获取数据与分析。');await refresh(created.runId);}catch(x){setNotice(x instanceof Error?x.message:'提交研究任务失败');}finally{setLoading(false);}};
   /** Cancels an active run and reloads its final task states. */
-  const cancel=async()=>{if(!run)return;try{await api(`/api/v1/agent/runs/${run.runId}/cancel`,{method:'POST'});setNotice('研究任务已取消');await refresh(run.runId);}catch(x){setNotice(x instanceof Error?x.message:'取消任务失败');}};
+  const cancel=async()=>{if(!run||cancelling)return;setCancelling(true);try{await api(`/api/v1/agent/runs/${run.runId}/cancel`,{method:'POST'});setNotice('研究任务已取消');await refresh(run.runId);}catch(x){setNotice(x instanceof Error?x.message:'取消任务失败');}finally{setCancelling(false);}};
   /** Resolves the server-recorded approval request before execution resumes. */
-  const approve=async()=>{if(!run)return;const requested=events.find(ev=>ev.eventType==='approval.requested');const id=requested?.payloadJson.match(/"approvalId":"([^"]+)"/)?.[1];if(!id)return setNotice('当前没有待确认的操作');try{await api(`/api/v1/agent/runs/${run.runId}/approvals/${id}`,{method:'POST',body:JSON.stringify({parameters:'{format=markdown}'})});setNotice('已确认，研究将继续执行。');await refresh(run.runId);}catch(x){setNotice(x instanceof Error?x.message:'确认失败');}};
-  const failure=events.findLast(event=>event.eventType==='task.failed'||event.eventType==='run.failed');const reason=failure?.payloadJson.match(/"reason":"([^"]*)"/)?.[1];
+  const requested=events.find(ev=>ev.eventType==='approval.requested');
+  const approval=approvalFromEvent(requested?.payloadJson);
+  const approve=async()=>{if(!run||!approval)return setNotice('当前没有待确认的操作');try{await api(`/api/v1/agent/runs/${run.runId}/approvals/${approval.approvalId}`,{method:'POST',body:JSON.stringify({parameters:approval.parameters})});setNotice('已确认，研究将继续执行。');await refresh(run.runId);}catch(x){setNotice(x instanceof Error?x.message:'确认失败');}};
+  const reject=async()=>{if(!run||!approval)return setNotice('当前没有待确认的操作');try{await api(`/api/v1/agent/runs/${run.runId}/approvals/${approval.approvalId}/reject`,{method:'POST'});setNotice('已拒绝这次操作');await refresh(run.runId);}catch(x){setNotice(x instanceof Error?x.message:'拒绝失败');}};
+  const failure=events.findLast(event=>event.eventType==='task.failed'||event.eventType==='run.failed');const reason=eventReason(failure?.payloadJson);
   return <AppShell notice={notice}><section className="workspace research-page"><p>RESEARCH</p><h2>研究任务</h2><p className="page-intro">系统会依次读取数据、分析指标、比较基金，并生成结果。执行中的任务每 2 秒自动更新。</p>
     <form className="research-form" onSubmit={submit}><label>研究内容<textarea value={message} onChange={e=>setMessage(e.target.value)} rows={3} placeholder="例如：比较两只基金近一年的风险与表现"/></label><button disabled={loading}>{loading?'正在创建…':'开始研究'}</button></form>
-    {run&&<><div className={`run-status ${run.status==='FAILED'?'failed':''}`}><div><small>当前状态</small><b>{runLabel[run.status]??run.status}</b><span>{terminal.has(run.status)?'本次任务已结束。':'正在更新进度，请保持页面打开。'}</span></div><div className="run-actions"><button className="secondary" onClick={()=>void refresh(run.runId)}>刷新进度</button>{!terminal.has(run.status)&&<button className="text-button" onClick={cancel}>取消任务</button>}{run.status==='WAITING_APPROVAL'&&<button onClick={approve}>确认继续</button>}</div></div>
+    {run&&<><div className={`run-status ${run.status==='FAILED'?'failed':''}`}><div><small>当前状态</small><b>{runLabel[run.status]??run.status}</b><span>{terminal.has(run.status)?'本次任务已结束。':'正在更新进度，请保持页面打开。'}</span></div><div className="run-actions"><button className="secondary" onClick={()=>void refresh(run.runId)}>刷新进度</button>{!terminal.has(run.status)&&<button type="button" className="text-button" onClick={()=>void cancel()} disabled={cancelling}>{cancelling?'正在取消…':'取消任务'}</button>}{run.status==='WAITING_APPROVAL'&&<><button type="button" onClick={()=>void approve()}>确认继续</button><button type="button" className="secondary" onClick={()=>void reject()}>拒绝</button></>}</div></div>
       {report&&<section className="research-report"><div><p>RESEARCH REPORT</p><h3>本次研究报告</h3><span>已汇总 {report.evidenceCount} 项研究产出</span></div><article>{report.content.split('\n').map((line,index)=>line.startsWith('# ')?<h4 key={index}>{line.slice(2)}</h4>:line.startsWith('## ')?<h5 key={index}>{line.slice(3)}</h5>:line.startsWith('- ')?<p key={index}>• {line.slice(2)}</p>:line?<p key={index}>{line}</p>:null)}</article></section>}
       {reason&&<div className="research-error"><b>本次研究未完成</b><span>{reason}</span><small>请调整研究范围后重新提交，或等待数据补齐。</small></div>}
-      {plan&&<section className="task-progress"><h3>研究进度</h3>{plan.tasks.map(t=><div key={t.taskKey} className={`task-row ${t.status==='FAILED'?'failed':''}`}><i>{t.status==='SUCCEEDED'?'✓':t.status==='FAILED'?'!':t.status==='RUNNING'?'…':'○'}</i><div><b>{taskName[t.capabilityType]??t.capabilityType}</b><small>{t.taskKey}</small></div><span>{taskLabel[t.status]??t.status}</span></div>)}</section>}
+      {plan&&<section className="task-progress"><h3>研究进度</h3>{plan.tasks.map(t=><div key={t.taskKey} className={`task-row ${t.status==='FAILED'?'failed':''}`}><i>{t.status==='SUCCEEDED'?'✓':t.status==='FAILED'?'!':t.status==='RUNNING'?'…':'○'}</i><div><b>{taskName[t.capabilityType]??'研究步骤'}</b></div><span>{taskLabel[t.status]??t.status}</span></div>)}</section>}
       <details className="event-panel"><summary>查看任务事件</summary><ol>{events.map(event=><li key={event.sequence}>{event.sequence}. {event.eventType}</li>)}</ol></details>
     </>}
   </section></AppShell>;
