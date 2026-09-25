@@ -5,7 +5,12 @@ import java.util.List;
 
 /** Deterministic short-term memory produced from a successful tool result. */
 public record AgentFactCard(String cardId,String conversationId,String runId,String toolName,String subjectKey,
-        List<EvidenceReference> evidence,String dataJson,Instant createdAt,Instant expiresAt) {
+        List<EvidenceReference> evidence,String dataJson,Instant createdAt,Instant expiresAt,
+        String sourceRevision,String contentHash,String supersedesCardId) {
+    public AgentFactCard(String cardId,String conversationId,String runId,String toolName,String subjectKey,
+            List<EvidenceReference> evidence,String dataJson,Instant createdAt,Instant expiresAt) {
+        this(cardId,conversationId,runId,toolName,subjectKey,evidence,dataJson,createdAt,expiresAt,null,null,null);
+    }
     public AgentFactCard { evidence=evidence==null?List.of():List.copyOf(evidence); }
 
     /** Stable folder file used for replacement and query-aware retrieval. */

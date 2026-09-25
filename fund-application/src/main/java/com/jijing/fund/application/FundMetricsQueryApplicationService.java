@@ -4,6 +4,7 @@ import com.jijing.fund.analytics.calculator.FundMetricsCalculator;
 import com.jijing.fund.analytics.model.*;
 import com.jijing.fund.analytics.port.FundMetricsCache;
 import com.jijing.fund.application.exception.*;
+import com.jijing.fund.domain.event.DomainEventPublisher;
 import com.jijing.fund.domain.model.*;
 import com.jijing.fund.domain.provider.ExternalFundDataProvider;
 import com.jijing.fund.domain.repository.*;
@@ -14,9 +15,15 @@ import java.util.*;
 public class FundMetricsQueryApplicationService implements FundMetricsQueryUseCase {
     private final FundRepository funds; private final FundNavRepository navs; private final TradingCalendarRepository calendar;
     private final FundMetricsCache cache; private final FundMetricsCalculator calculator; private final CalculationContext context; private final ExternalFundDataProvider provider;
+    private final DomainEventPublisher events;
     public FundMetricsQueryApplicationService(FundRepository funds, FundNavRepository navs, TradingCalendarRepository calendar,
             FundMetricsCache cache, FundMetricsCalculator calculator, CalculationContext context, ExternalFundDataProvider provider) {
+        this(funds, navs, calendar, cache, calculator, context, provider, DomainEventPublisher.NOOP);
+    }
+    public FundMetricsQueryApplicationService(FundRepository funds, FundNavRepository navs, TradingCalendarRepository calendar,
+            FundMetricsCache cache, FundMetricsCalculator calculator, CalculationContext context, ExternalFundDataProvider provider, DomainEventPublisher events) {
         this.funds=funds; this.navs=navs; this.calendar=calendar; this.cache=cache; this.calculator=calculator; this.context=context; this.provider=provider;
+        this.events=events==null?DomainEventPublisher.NOOP:events;
     }
     @Override public FundMetrics calculate(String fundCode, LocalDate start, LocalDate end, String requestedBasis) {
         FundCode code = parseCode(fundCode);
@@ -29,6 +36,7 @@ public class FundMetricsQueryApplicationService implements FundMetricsQueryUseCa
             if (!fetched.isEmpty()) {
                 navs.upsertBatch(fetched);
                 funds.incrementDataRevision(code, fetched.getLast().navDate());
+                events.append("FUND_NAV_UPDATED","fund",code.value(),null,"v1","nav-"+code.value()+"-"+fetched.getLast().navDate(),Map.of("navDate",fetched.getLast().navDate().toString(),"saved",fetched.size()));
                 points = fetched.stream().filter(p -> p.navStatus() == NavStatus.CONFIRMED || p.navStatus() == NavStatus.CORRECTED).toList();
             }
         }

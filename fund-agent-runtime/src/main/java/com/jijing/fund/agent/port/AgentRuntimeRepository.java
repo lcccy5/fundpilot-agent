@@ -36,6 +36,8 @@ public interface AgentRuntimeRepository {
     void recordToolCall(AgentToolCallRecord record);
     default void saveFactCard(AgentFactCard card) {}
     default List<AgentFactCard> findActiveFactCards(String conversationId, Instant now, int limit) { return List.of(); }
+    /** Drops current pointers so a revised source cannot be reused until a new observation arrives. */
+    default void invalidateFactMemory(String fundCode, List<String> categories) {}
     default void recordFactCardUsage(String runId, List<String> cardIds, Instant usedAt) {}
     default AgentConversationState findConversationState(String conversationId) { return AgentConversationState.empty(conversationId); }
     default void saveConversationState(AgentConversationState state) {}

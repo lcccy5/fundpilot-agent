@@ -5,6 +5,7 @@ import com.jijing.fund.agent.api.AgentFactCard;
 import com.jijing.fund.agent.api.AgentConversationState;
 import com.jijing.fund.agent.api.EvidenceReference;
 import com.jijing.fund.agent.api.TokenUsage;
+import com.jijing.fund.agent.orchestration.FactMemoryRevision;
 import com.jijing.fund.agent.port.*;
 import com.jijing.fund.domain.identity.UserId;
 import java.sql.Timestamp;
@@ -50,17 +51,33 @@ public class JdbcAgentRuntimeRepository implements AgentRuntimeRepository {
             INSERT INTO agent_tool_call(run_id,tool_name,tool_version,argument_hash,arguments_redacted_json,result_status,evidence_ids_json,error_code,duration_ms,started_at,completed_at)
             VALUES(?,?,?,?,CAST(? AS JSON),?,CAST(? AS JSON),?,?,?,?)
             """,r.runId(),r.toolName(),r.toolVersion(),r.argumentHash(),r.argumentsRedactedJson(),r.resultStatus(),json(r.evidenceIds()),r.errorCode(),r.durationMs(),ts(r.startedAt()),ts(r.completedAt()));}
-    @Override @Transactional public void saveFactCard(AgentFactCard card){jdbc.update("""
-            INSERT INTO agent_fact_card(card_id,conversation_id,run_id,tool_name,subject_key,memory_category,evidence_ids_json,evidence_json,data_json,created_at,expires_at)
-            VALUES(?,?,?,?,?,?,CAST(? AS JSON),CAST(? AS JSON),CAST(? AS JSON),?,?)
-            """,card.cardId(),card.conversationId(),card.runId(),card.toolName(),card.subjectKey(),card.memoryCategory(),json(card.evidenceIds()),json(card.evidence()),
-            card.dataJson(),ts(card.createdAt()),ts(card.expiresAt()));
-        if(card.subjectKey()==null||card.subjectKey().isBlank())return;
-        for(String subject:card.subjectKey().split(",")){String fundCode=subject.trim();if(fundCode.isEmpty())continue;jdbc.update("""
+    @Override @Transactional public void saveFactCard(AgentFactCard card){
+        String category=card.memoryCategory();
+        String primary=primarySubject(card.subjectKey());
+        String superseded=primary==null?null:jdbc.query("""
+                SELECT card_id FROM agent_fund_memory_current
+                WHERE conversation_id=? AND fund_code=? AND memory_category=?
+                """,(rs,row)->rs.getString(1),card.conversationId(),primary,category).stream().findFirst().orElse(null);
+        AgentFactCard stamped=FactMemoryRevision.stamp(card,superseded);
+        jdbc.update("""
+            INSERT INTO agent_fact_card(card_id,conversation_id,run_id,tool_name,subject_key,memory_category,evidence_ids_json,evidence_json,data_json,source_revision,content_hash,supersedes_card_id,created_at,expires_at)
+            VALUES(?,?,?,?,?,?,CAST(? AS JSON),CAST(? AS JSON),CAST(? AS JSON),?,?,?,?,?)
+            """,stamped.cardId(),stamped.conversationId(),stamped.runId(),stamped.toolName(),stamped.subjectKey(),category,json(stamped.evidenceIds()),json(stamped.evidence()),
+            stamped.dataJson(),stamped.sourceRevision(),stamped.contentHash(),stamped.supersedesCardId(),ts(stamped.createdAt()),ts(stamped.expiresAt()));
+        if(stamped.subjectKey()==null||stamped.subjectKey().isBlank())return;
+        for(String subject:stamped.subjectKey().split(",")){String fundCode=subject.trim();if(fundCode.isEmpty())continue;jdbc.update("""
                 INSERT INTO agent_fund_memory_current(conversation_id,fund_code,memory_category,card_id,updated_at)
                 VALUES(?,?,?,?,?)
                 ON DUPLICATE KEY UPDATE card_id=VALUES(card_id),updated_at=VALUES(updated_at)
-                """,card.conversationId(),fundCode,card.memoryCategory(),card.cardId(),ts(card.createdAt()));}}
+                """,stamped.conversationId(),fundCode,category,stamped.cardId(),ts(stamped.createdAt()));}}
+    @Override public void invalidateFactMemory(String fundCode,List<String> categories){
+        if(fundCode==null||fundCode.isBlank()||categories==null||categories.isEmpty())return;
+        String marks=String.join(",",categories.stream().map(ignored->"?").toList());
+        Object[] args=new Object[categories.size()+1];
+        args[0]=fundCode;
+        for(int i=0;i<categories.size();i++)args[i+1]=categories.get(i);
+        jdbc.update("DELETE FROM agent_fund_memory_current WHERE fund_code=? AND memory_category IN ("+marks+")",args);
+    }
     @Override public List<AgentFactCard> findActiveFactCards(String conversationId,Instant now,int limit){return jdbc.query("""
             SELECT c.card_id,c.conversation_id,c.run_id,c.tool_name,m.fund_code AS retrieval_subject,
                    c.evidence_json,c.data_json,c.created_at,c.expires_at
@@ -86,6 +103,11 @@ public class JdbcAgentRuntimeRepository implements AgentRuntimeRepository {
             ON DUPLICATE KEY UPDATE active_fund=VALUES(active_fund),mentioned_funds_json=VALUES(mentioned_funds_json),
                 period_start=VALUES(period_start),period_end=VALUES(period_end),active_topic=VALUES(active_topic),updated_at=VALUES(updated_at)
             """,state.conversationId(),state.activeFund(),json(state.mentionedFunds()),state.periodStart(),state.periodEnd(),state.activeTopic(),ts(state.updatedAt()));}
+    private String primarySubject(String subjectKey){
+        if(subjectKey==null||subjectKey.isBlank())return null;
+        String first=subjectKey.split(",")[0].trim();
+        return first.isEmpty()?null:first;
+    }
     private List<EvidenceReference> evidence(String value){try{return mapper.readValue(value,mapper.getTypeFactory().constructCollectionType(List.class,EvidenceReference.class));}catch(Exception ex){return List.of();}}
     private List<String> strings(String value){try{return mapper.readValue(value,mapper.getTypeFactory().constructCollectionType(List.class,String.class));}catch(Exception ex){return List.of();}}
     private String json(Object value){try{return mapper.writeValueAsString(value);}catch(Exception ex){return "[]";}}

@@ -20,6 +20,20 @@ class FundQueryApplicationServiceTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-02-01T00:00:00Z"), ZoneOffset.UTC);
     private final FundQueryApplicationService service = new FundQueryApplicationService(funds, navs, cache, provider, clock);
 
+    @Test void nameSearchReturnsHitsAndKeepsAnEmptyResultDistinctFromRejection() {
+        FundCode code = new FundCode("000001");
+        var profile = new FundProfile(code, "华夏成长混合", "混合型", "华夏基金", "王明", LocalDate.of(2001,12,18),
+                "mock", Instant.parse("2026-01-31T00:00:00Z"), Instant.parse("2026-01-31T00:00:00Z"));
+        when(funds.searchByName("华夏", 8)).thenReturn(List.of(profile));
+        var hits = service.searchByName(" 华夏 ");
+        assertEquals(1, hits.size());
+        assertEquals("000001", hits.getFirst().fundCode());
+        assertEquals("混合型", hits.getFirst().fundType());
+        when(funds.searchByName("没有这只", 8)).thenReturn(List.of());
+        assertTrue(service.searchByName("没有这只").isEmpty());
+        assertThrows(InvalidFundQueryException.class, () -> service.searchByName("  "));
+    }
+
     @Test void returnsDatabaseProfileAndFillsCache() {
         FundCode code = new FundCode("000001");
         var profile = new FundProfile(code, "华夏成长混合", "混合型", "华夏基金", "王明", LocalDate.of(2001,12,18),

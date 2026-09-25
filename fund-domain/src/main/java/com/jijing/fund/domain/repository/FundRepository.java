@@ -6,6 +6,7 @@ import java.time.LocalDate;
 
 public interface FundRepository {
     Optional<FundProfile> findByCode(FundCode fundCode);
+    List<FundProfile> searchByName(String name, int limit);
     void save(FundProfile profile);
     List<FundCode> findEnabledFundCodes(int offset, int limit);
     long getDataRevision(FundCode fundCode);

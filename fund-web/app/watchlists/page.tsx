@@ -8,17 +8,24 @@ type FundCode=string|{value:string};
 type Item={itemId:string;fundCode:FundCode;version:number};
 type Group={groupId:string;displayName:string;version:number;items:Item[]};
 type FundProfile={fundCode:string;name:string;fundType?:string;managementCompany?:string;fundManager?:string};
+type Quote={unitNav:number;navDate:string};
 
 const codeOf=(item:Item)=>typeof item.fundCode==='string'?item.fundCode:item.fundCode.value;
-const hydrateProfiles=(next:Group[],onProfile:(fundCode:string,profile:FundProfile)=>void)=>{
+const iso=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+const hydrateProfiles=(next:Group[],onProfile:(fundCode:string,profile:FundProfile)=>void,onQuote:(fundCode:string,quote:Quote)=>void)=>{
   const fundCodes=[...new Set(next.flatMap(group=>group.items.map(codeOf)))].filter(Boolean);
-  void Promise.all(fundCodes.map(async fundCode=>{try{onProfile(fundCode,await api<FundProfile>(`/api/v1/funds/${fundCode}`));}catch{/* Keep showing the code if profile data is temporarily unavailable. */}}));
+  const end=new Date();const start=new Date(end);start.setFullYear(start.getFullYear()-1);
+  void Promise.all(fundCodes.map(async fundCode=>{
+    try{onProfile(fundCode,await api<FundProfile>(`/api/v1/funds/${fundCode}`));}catch{/* Keep showing the code if profile data is temporarily unavailable. */}
+    try{const history=await api<{items?:Quote[]}>(`/api/v1/funds/${fundCode}/nav?startDate=${iso(start)}&endDate=${iso(end)}`);const latest=[...(history.items??[])].sort((a,b)=>a.navDate.localeCompare(b.navDate)).at(-1);if(latest)onQuote(fundCode,latest);}catch{/* A missing quote should not hide the saved fund. */}
+  }));
 };
 
 /** Gives users an immediately recognizable inventory of the funds they follow. */
 export default function WatchlistsPage(){
   const[groups,setGroups]=useState<Group[]>([]);
   const[profiles,setProfiles]=useState<Record<string,FundProfile>>({});
+  const[quotes,setQuotes]=useState<Record<string,Quote>>({});
   const[groupName,setGroupName]=useState('');
   const[codes,setCodes]=useState<Record<string,string>>({});
   const[notice,setNotice]=useState('正在加载你的自选…');
@@ -27,7 +34,7 @@ export default function WatchlistsPage(){
   const[removingItem,setRemovingItem]=useState<string>();
   const[recentlyAdded,setRecentlyAdded]=useState<string>();
 
-  const showProfiles=(next:Group[])=>hydrateProfiles(next,(fundCode,profile)=>setProfiles(current=>({...current,[fundCode]:profile})));
+  const showProfiles=(next:Group[])=>hydrateProfiles(next,(fundCode,profile)=>setProfiles(current=>({...current,[fundCode]:profile})),(fundCode,quote)=>setQuotes(current=>({...current,[fundCode]:quote})));
   const load=async(announce=true)=>{
     try{const next=await api<Group[]>('/api/v1/watchlists');setGroups(next);showProfiles(next);if(announce){const count=next.reduce((sum,group)=>sum+group.items.length,0);setNotice(count?`已加载 ${count} 只自选基金`:'还没有自选基金，先添加一只吧');}}
     catch(x){setNotice(x instanceof Error?x.message:'请先登录后查看云端自选');}
@@ -42,7 +49,7 @@ export default function WatchlistsPage(){
 
   const localCodes=guestWatch();
   const total=useMemo(()=>groups.reduce((sum,group)=>sum+group.items.length,0),[groups]);
-  return <AppShell notice={notice}><section className="workspace watchlist-page">
+  return <AppShell notice={notice} title="我的自选" kicker="WATCHLIST"><section className="workspace watchlist-page">
     <div className="watchlist-title"><div><p>WATCHLIST</p><h2>我的自选</h2><span>集中查看你关注的基金，从这里继续研究。</span></div><div className="watchlist-total"><b>{total}</b><small>只基金 · {groups.length} 个分组</small></div></div>
     {localCodes.length>0&&<section className="local-watch"><div><b>此设备还有 {localCodes.length} 只自选未同步</b><small>{localCodes.join('、')} · 同步后换设备也能看到</small></div><button className="primary" onClick={merge}>同步到我的账户</button></section>}
     {loading?<div className="empty-panel">正在加载自选基金…</div>:groups.length?<div className="watch-groups">{groups.map(group=><section key={group.groupId} className="watch-group">
@@ -50,6 +57,7 @@ export default function WatchlistsPage(){
       {group.items.length?<div className="watch-fund-grid">{group.items.map(item=>{const fundCode=codeOf(item),profile=profiles[fundCode];return <article key={item.itemId} className={`watch-fund-card ${recentlyAdded===fundCode?'just-added':''}`}>
         <div className="watch-fund-main"><span className="fund-avatar">{profile?.name?.slice(0,1)??'基'}</span><div><strong>{profile?.name??`基金 ${fundCode}`}</strong><small><code>{fundCode}</code>{profile?.fundType&&` · ${profile.fundType}`}</small></div></div>
         <div className="watch-fund-meta"><span>{profile?.managementCompany??'基金资料加载中'}</span>{profile?.fundManager&&<span>基金经理 {profile.fundManager}</span>}</div>
+        <div className="quote-line">{quotes[fundCode]?<>{Number(quotes[fundCode].unitNav).toFixed(4)}<small>净值日期 {quotes[fundCode].navDate}</small></>: <small>净值加载中</small>}</div>
         <div className="watch-fund-actions"><Link href={`/?code=${fundCode}`}>查看详情与研究 <span aria-hidden="true">→</span></Link><button type="button" className="remove-watch" disabled={removingItem===item.itemId} onClick={()=>void remove(group,item)}>{removingItem===item.itemId?'删除中…':'删除'}</button></div>
       </article>})}</div>:<div className="watch-empty"><b>这个分组还没有基金</b><span>在下方输入 6 位基金代码即可加入。</span></div>}
       <form className="add-fund-form" onSubmit={e=>{e.preventDefault();void add(group);}}><label><span>添加基金</span><input aria-label={`添加基金到${group.displayName}`} inputMode="numeric" value={codes[group.groupId]??''} onChange={e=>setCodes(current=>({...current,[group.groupId]:e.target.value.replace(/\D/g,'').slice(0,6)}))} placeholder="输入 6 位基金代码"/></label><button disabled={addingTo===group.groupId}>{addingTo===group.groupId?'正在加入…':'加入自选'}</button></form>

@@ -12,6 +12,7 @@ import com.jijing.fund.application.FundQueryUseCase;
 import com.jijing.fund.application.dto.FundComparisonResult;
 import com.jijing.fund.application.dto.FundNavHistoryResult;
 import com.jijing.fund.application.dto.FundProfileResult;
+import com.jijing.fund.application.dto.FundSearchHit;
 import com.jijing.fund.application.dto.NavPointResult;
 import com.jijing.fund.application.research.RealtimeFundQuoteResult;
 import com.jijing.fund.application.research.RealtimeFundQuoteStatus;
@@ -54,6 +55,10 @@ public class AgentEvaluationFixtureConfiguration {
             @Override public FundProfileResult getProfile(String code) {
                 return new FundProfileResult(code, "评测基金-" + AgentEvaluationFixtureContext.current(), "混合型", "评测基金公司",
                         "评测基金经理", LocalDate.of(2015, 1, 1), "agent-eval-fixture", NOW, NOW, "FRESH");
+            }
+            @Override public java.util.List<FundSearchHit> searchByName(String name) {
+                if (name == null || name.isBlank()) return java.util.List.of();
+                return java.util.List.of(new FundSearchHit("000001", "评测基金-" + name.trim(), "混合型"));
             }
             @Override public FundNavHistoryResult getNavHistory(String code, LocalDate start, LocalDate end) {
                 return new FundNavHistoryResult(code, "agent-eval-fixture", List.of(

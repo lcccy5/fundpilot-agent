@@ -5,6 +5,7 @@ import com.jijing.fund.application.dto.*;
 import com.jijing.fund.interfaces.api.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDate;
+import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,6 +14,10 @@ import org.springframework.web.bind.annotation.*;
 public class FundQueryController {
     private final FundQueryUseCase useCase;
     public FundQueryController(FundQueryUseCase useCase) { this.useCase = useCase; }
+    @GetMapping(params = "q")
+    public ApiResponse<List<FundSearchHit>> search(@RequestParam("q") String query, HttpServletRequest request) {
+        return ApiResponse.success(RequestIdFilter.get(request), useCase.searchByName(query));
+    }
     @GetMapping("/{fundCode}")
     public ApiResponse<FundProfileResult> profile(@PathVariable("fundCode") String fundCode, HttpServletRequest request) {
         return ApiResponse.success(RequestIdFilter.get(request), useCase.getProfile(fundCode));

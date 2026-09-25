@@ -7,11 +7,13 @@ import com.jijing.fund.agent.multiagent.MultiAgentEnablementPolicy;
 import com.jijing.fund.agent.multiagent.MultiAgentSupervisor;
 import com.jijing.fund.agent.planning.PlanValidator;
 import com.jijing.fund.agent.planning.RuleBasedPlanner;
+import com.jijing.fund.agent.exception.AgentInvalidArgumentException;
 import com.jijing.fund.agent.routing.ExecutionModeRouter;
 import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.Instant;
 import java.util.HexFormat;
 
@@ -45,8 +47,39 @@ public final class MonthlyReportLauncher {
         if(assignment.plan()!=null)new PlanValidator().validate(assignment.plan(),ownerUserId);
         var run=runs.submit(new AgentRunCommand(null,GOAL,"monthly-"+ownerUserId,ownerUserId,true));
         LocalDate end=LocalDate.now(clock);
-        var job=jobs.create(ownerUserId,run.runId(),end.minusMonths(1),end,clock.instant());
+        jobs.create(ownerUserId,run.runId(),end.minusMonths(1),end,clock.instant());
         return run;
+    }
+
+    /** Starts a report only for a chosen month and a scope that already has funds. */
+    public AgentRunView launch(String ownerUserId, MonthlyReportScope scope) {
+        if (scope == null || scope.month() == null || scope.month().isBlank())
+            throw new AgentInvalidArgumentException("请选择月份，以及一个有数据的组合或自选");
+        if (scope.fundCodes().isEmpty())
+            throw new AgentInvalidArgumentException(missing(scope));
+        YearMonth month;
+        try { month = YearMonth.parse(scope.month()); }
+        catch (Exception error) { throw new AgentInvalidArgumentException("月份格式应为 YYYY-MM"); }
+        YearMonth current = YearMonth.now(clock);
+        if (month.isAfter(current))
+            throw new AgentInvalidArgumentException(scope.month() + " 还没到，不能生成这份月报");
+        LocalDate start = month.atDay(1);
+        LocalDate end = month.atEndOfMonth();
+        LocalDate today = LocalDate.now(clock);
+        if (end.isAfter(today)) end = today;
+        String kind = "WATCHLIST".equals(scope.kind()) ? "自选" : "组合";
+        String label = scope.label() == null || scope.label().isBlank() ? kind : scope.label();
+        String goal = "比较 " + String.join(" ", scope.fundCodes()) + " 期间" + start + "至" + end
+                + " 并结合我的" + kind + "「" + label + "」生成报告";
+        var run = runs.submit(new AgentRunCommand(null, goal, "monthly-" + ownerUserId, ownerUserId, true));
+        jobs.create(ownerUserId, run.runId(), start, end, clock.instant());
+        return run;
+    }
+
+    private static String missing(MonthlyReportScope scope) {
+        String name = scope.label() == null || scope.label().isBlank() ? "" : "「" + scope.label() + "」";
+        if ("WATCHLIST".equals(scope.kind())) return "自选" + name + "里还没有基金，无法生成月报";
+        return "组合" + name + "还没有持仓，无法生成月报";
     }
 
     /**

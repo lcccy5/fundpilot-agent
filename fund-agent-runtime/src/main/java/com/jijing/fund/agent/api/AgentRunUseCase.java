@@ -7,6 +7,7 @@ public interface AgentRunUseCase {
     
     /** 创建并初始化当前 Agent 操作所需的 submit 结果。 */
     AgentRunView submit(AgentRunCommand command);
+    java.util.List<AgentResearchHistoryItem> list(String ownerUserId);
     
     /** 获取当前 Agent 操作所需的 get 结果。 */
     AgentRunView get(String runId,String ownerUserId);

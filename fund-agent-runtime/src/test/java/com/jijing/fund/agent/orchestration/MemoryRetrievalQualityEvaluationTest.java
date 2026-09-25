@@ -58,6 +58,26 @@ class MemoryRetrievalQualityEvaluationTest {
         assertThat(budgetCompliance).isEqualTo(100);
     }
 
+    @Test void revisedNavAndHoldingsCannotBeReused() {
+        var ledger = new ActiveMemory();
+        ledger.put(card("nav-old", "get_fund_nav_history", "000001", "{\"unitNav\":1.10}", NOW.minusSeconds(50)));
+        ledger.put(card("hold-old", "get_fund_holdings", "000001", "{\"stock\":\"旧仓\"}", NOW.minusSeconds(40)));
+        ledger.put(card("nav-other", "get_fund_nav_history", "110022", "{\"unitNav\":2.20}", NOW.minusSeconds(30)));
+        ledger.invalidate("000001", FactMemoryRevision.categoriesFor("FUND_NAV_UPDATED"));
+        var afterNav = selector.select("它最新的累计净值是多少？", state("000001", null, null, "NAV"), ledger.active(), 3, TOKEN_BUDGET);
+        assertThat(afterNav.cardIds()).doesNotContain("nav-old");
+        assertThat(ledger.active()).extracting(AgentFactCard::cardId).contains("nav-other", "hold-old").doesNotContain("nav-old");
+        ledger.invalidate("000001", FactMemoryRevision.categoriesFor("PORTFOLIO_TRANSACTION_RECORDED"));
+        var afterHoldings = selector.select("它的持仓有哪些？", state("000001", null, null, "HOLDINGS"), ledger.active(), 3, TOKEN_BUDGET);
+        assertThat(afterHoldings.cardIds()).doesNotContain("hold-old");
+        ledger.invalidate("110022", FactMemoryRevision.categoriesFor("DOCUMENT_VERSION_ACTIVATED"));
+        assertThat(ledger.active()).extracting(AgentFactCard::cardId).contains("nav-other");
+        var stamped = FactMemoryRevision.stamp(card("nav-new", "get_fund_nav_history", "000001", "{\"unitNav\":1.20}", NOW), "nav-old");
+        assertThat(stamped.contentHash()).hasSize(64);
+        assertThat(stamped.supersedesCardId()).isEqualTo("nav-old");
+        assertThat(stamped.sourceRevision()).isEqualTo(stamped.contentHash());
+    }
+
     private List<Case> cases() throws Exception {
         var profileState = state("000001", null, null, "PROFILE");
         var metricState = state("110022", LocalDate.of(2026,1,1), LocalDate.of(2026,8,31), "METRICS");
@@ -104,4 +124,14 @@ class MemoryRetrievalQualityEvaluationTest {
     private record Observation(String caseId,Set<String> expectedCardIds,Set<String> selectedCardIds,int promptTokens,boolean withinBudget) {}
     private record Report(String datasetVersion,int cases,double recallPercent,double precisionPercent,
                           double abstentionAccuracyPercent,double budgetCompliancePercent,List<Observation> observations,String scope) {}
+
+    /** Mirrors the current-pointer table: revision deletes a fund/category slot, other slots stay. */
+    private static final class ActiveMemory {
+        private final java.util.Map<String, AgentFactCard> cards = new java.util.LinkedHashMap<>();
+        void put(AgentFactCard card) { cards.put(card.subjectKey() + ":" + card.memoryCategory(), card); }
+        void invalidate(String fund, List<String> categories) {
+            cards.keySet().removeIf(key -> categories.stream().anyMatch(category -> key.equals(fund + ":" + category)));
+        }
+        List<AgentFactCard> active() { return List.copyOf(cards.values()); }
+    }
 }

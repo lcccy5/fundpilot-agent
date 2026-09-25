@@ -16,6 +16,9 @@ public interface AgentDagRepository {
     
     /** 创建并初始化当前 Agent 操作所需的 startRun 结果。 */
     String startRun(String conversationId,String ownerUserId,String requestId,String executionMode,String routeReason,Instant now);
+    /** Stores the question and fund the user asked about so history can be listed later. */
+    default void rememberResearch(String runId,String ownerUserId,String message,String fundCode) {}
+    default java.util.List<AgentResearchHistoryItem> listOwnedResearch(String ownerUserId,int limit) { return java.util.List.of(); }
     
     /** 通过 saveRoute 操作更新持久化或内存中的运行状态。 */
     void saveRoute(String runId,String ownerUserId,RouteDecision decision,Instant now);

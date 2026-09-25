@@ -11,7 +11,7 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:ci": "tsc --noEmit",
-    "test:e2e": "node ./e2e/session-gate.mjs && node ./e2e/v3-browser.mjs"
+    "test:e2e": "node ./e2e/session-gate.mjs && node ./e2e/query-race.mjs && node ./e2e/import-errors.mjs && node ./e2e/login-return.mjs && node ./e2e/v3-browser.mjs"
   },
   "dependencies": {
     "next": "16.2.6",

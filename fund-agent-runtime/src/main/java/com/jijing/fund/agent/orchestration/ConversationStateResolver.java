@@ -25,8 +25,13 @@ final class ConversationStateResolver {
 
         List<LocalDate> dates = findDates(message);
         DateRange relative = dates.size() >= 2 ? null : relativePeriod(message, now);
+        LocalDate today = now.atZone(BUSINESS_ZONE).toLocalDate();
         LocalDate start = dates.size() >= 2 ? dates.get(0) : relative != null ? relative.start() : base.periodStart();
         LocalDate end = dates.size() >= 2 ? dates.get(1) : relative != null ? relative.end() : base.periodEnd();
+        if (dates.size() < 2 && relative == null && rejectsStalePeriod(message, today, end)) {
+            start = null;
+            end = null;
+        }
         String active = explicitFunds.isEmpty() ? base.activeFund() : explicitFunds.get(explicitFunds.size() - 1);
         String topic = topic(message, base.activeTopic());
         return new AgentConversationState(base.conversationId(), active, List.copyOf(funds), start, end, topic, now);
@@ -64,6 +69,12 @@ final class ConversationStateResolver {
     private boolean containsAny(String text, String... terms) {
         for (String term : terms) if (text.contains(term)) return true;
         return false;
+    }
+
+    private boolean rejectsStalePeriod(String message, LocalDate today, LocalDate inheritedEnd) {
+        if (inheritedEnd == null || !inheritedEnd.isBefore(today)) return false;
+        String text = message == null ? "" : message;
+        return text.contains("现在") && text.contains(Integer.toString(today.getYear()));
     }
 
     private DateRange relativePeriod(String message, Instant now) {

@@ -37,6 +37,21 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
                 """,runId,conversationId,requestId==null?"unknown":requestId,"runtime-v4","0".repeat(64),"capabilities-v1","hybrid","hybrid-router","RUNNING",executionMode,"hybrid-router-v1",routeReason,ts(now));
         return runId;
     }
+    @Override public void rememberResearch(String runId,String ownerUserId,String message,String fundCode){
+        int updated=jdbc.update("""
+                UPDATE agent_run r JOIN agent_conversation c ON c.conversation_id=r.conversation_id
+                SET r.research_message=?,r.subject_fund=?
+                WHERE r.run_id=? AND c.owner_user_id=?
+                """,message,fundCode,runId,ownerUserId);
+        if(updated==0)throw new AgentRunNotFoundException("run not found");
+    }
+    @Override public List<AgentResearchHistoryItem> listOwnedResearch(String ownerUserId,int limit){
+        return jdbc.query("""
+                SELECT r.run_id,r.status,r.research_message,r.subject_fund,r.started_at
+                FROM agent_run r JOIN agent_conversation c ON c.conversation_id=r.conversation_id
+                WHERE c.owner_user_id=? ORDER BY r.started_at DESC LIMIT ?
+                """,(rs,row)->new AgentResearchHistoryItem(rs.getString("run_id"),rs.getString("status"),rs.getString("research_message"),rs.getString("subject_fund"),rs.getTimestamp("started_at").toInstant()),ownerUserId,Math.max(1,limit));
+    }
     @Override @Transactional public void saveRoute(String runId,String ownerUserId,RouteDecision decision,Instant now){
         jdbc.update("""
                 INSERT INTO agent_route_decision(decision_id,run_id,owner_user_id,execution_mode,direct_variant,router_version,features_json,matched_rule,model_suggestion,override_reason,created_at)
@@ -89,8 +104,8 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
         AgentRunView run=requireOwnedRun(runId,ownerUserId);
         if(run.planId()==null)throw new AgentRunNotFoundException("plan not found");
         var tasks=jdbc.query("""
-                SELECT task_id,task_key,capability_type,status,attempts,output_uri FROM agent_task WHERE plan_id=? ORDER BY task_key
-                """,(rs,n)->new AgentTaskView(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getInt(5),rs.getString(6)),run.planId());
+                SELECT task_id,task_key,capability_type,status,attempts,output_uri,CAST(input_json AS CHAR) FROM agent_task WHERE plan_id=? ORDER BY task_key
+                """,(rs,n)->new AgentTaskView(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getInt(5),rs.getString(6),rs.getString(7)),run.planId());
         return new AgentPlanView(run.planId(),runId,ownerUserId,run.status(),"plan",1,tasks);
     }
     @Override public List<AgentRunEventView> eventsAfter(String runId,String ownerUserId,long lastSequence){
@@ -196,7 +211,7 @@ public class JdbcAgentDagRepository implements AgentDagRepository {
         var run=jdbc.query("SELECT p.run_id,t.task_key FROM agent_task t JOIN agent_plan p ON p.plan_id=t.plan_id WHERE t.task_id=?",(rs,n)->new String[]{rs.getString(1),rs.getString(2)},taskId).stream().findFirst().orElse(null);
         if(run==null)return;
         jdbc.update("UPDATE agent_run SET status='WAITING_APPROVAL' WHERE run_id=?",run[0]);
-        appendEvent(run[0],"approval.requested","{\"approvalId\":\""+approvalId+"\",\"taskKey\":\""+run[1]+"\"}",now);
+        appendEvent(run[0],"approval.requested",json(java.util.Map.of("approvalId",approvalId,"taskKey",run[1],"parameters",claim.inputJson()==null?"":claim.inputJson())),now);
     }
     @Override public void markTaskReady(String taskId){jdbc.update("UPDATE agent_task SET status='READY' WHERE task_id=? AND status NOT IN ('SUCCEEDED','CANCELLED')",taskId);}
     @Override @Transactional public void cancelRun(String runId,String ownerUserId,Instant now){

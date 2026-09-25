@@ -21,8 +21,11 @@ public class JdbcNotificationStore implements NotificationStore {
     }
     @Override public List<StoredNotification> listOwned(String ownerUserId){
         return jdbc.query("""
-                SELECT notification_id,owner_user_id,rule_id,trigger_fingerprint,status,created_at
+                SELECT notification_id,owner_user_id,rule_id,trigger_fingerprint,status,created_at,read_at
                 FROM notification_record WHERE owner_user_id=? ORDER BY created_at DESC LIMIT 50
-                """,(rs,n)->new StoredNotification(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getTimestamp(6).toInstant()),ownerUserId);
+                """,(rs,n)->new StoredNotification(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getTimestamp(6).toInstant(),rs.getTimestamp(7)==null?null:rs.getTimestamp(7).toInstant()),ownerUserId);
+    }
+    @Override public boolean markRead(String ownerUserId,String notificationId,Instant now){
+        return jdbc.update("UPDATE notification_record SET read_at=COALESCE(read_at,?) WHERE notification_id=? AND owner_user_id=?",Timestamp.from(now),notificationId,ownerUserId)>0;
     }
 }

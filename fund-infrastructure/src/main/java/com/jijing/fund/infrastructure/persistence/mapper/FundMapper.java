@@ -8,6 +8,10 @@ import org.apache.ibatis.annotations.*;
 @Mapper
 public interface FundMapper extends BaseMapper<FundEntity> {
     @Select("SELECT * FROM fund WHERE fund_code = #{code} LIMIT 1") FundEntity findByCode(@Param("code") String code);
+    @Select("""
+        SELECT * FROM fund WHERE enabled = 1 AND fund_name LIKE CONCAT('%', #{name}, '%') ESCAPE '\\\\'
+        ORDER BY CHAR_LENGTH(fund_name), fund_code LIMIT #{limit}
+        """) List<FundEntity> searchByName(@Param("name") String name, @Param("limit") int limit);
     @Select("SELECT * FROM fund WHERE enabled = 1 ORDER BY fund_code LIMIT #{limit} OFFSET #{offset}") List<FundEntity> findEnabled(@Param("offset") int offset, @Param("limit") int limit);
     @Insert("""
         INSERT INTO fund(fund_code,fund_name,fund_type,management_company,fund_manager,established_date,enabled,data_source,source_updated_at,collected_at)

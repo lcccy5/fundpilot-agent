@@ -34,6 +34,18 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
         runs.put(runId,new RunState(runId,conversationId,ownerUserId,"RUNNING",executionMode,routeReason,null,0,new ArrayList<>(),now));
         return runId;
     }
+    @Override public void rememberResearch(String runId,String ownerUserId,String message,String fundCode){
+        synchronized(lock){RunState run=owned(runId,ownerUserId);run.message=message;run.fundCode=fundCode;}
+    }
+    @Override public List<AgentResearchHistoryItem> listOwnedResearch(String ownerUserId,int limit){
+        synchronized(lock){
+            return runs.values().stream().filter(run->ownerUserId.equals(run.ownerUserId))
+                    .sorted((a,b)->b.startedAt.compareTo(a.startedAt))
+                    .limit(Math.max(1,limit))
+                    .map(run->new AgentResearchHistoryItem(run.runId,run.status,run.message,run.fundCode,run.startedAt))
+                    .toList();
+        }
+    }
 
     @Override 
     /** 通过 saveRoute 操作更新持久化或内存中的运行状态。 */
@@ -160,7 +172,7 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
             TaskState task=tasks.get(taskId);if(task==null)return;
             task.status="WAITING_APPROVAL";task.leaseUntil=null;
             RunState run=runs.get(task.runId);run.status="WAITING_APPROVAL";
-            appendUnlocked(run,"approval.requested","{\"approvalId\":\""+approvalId+"\",\"taskKey\":\""+task.taskKey+"\"}",now);
+            appendUnlocked(run,"approval.requested",toJson(Map.of("approvalId",approvalId,"taskKey",task.taskKey==null?"":task.taskKey,"parameters",task.inputJson==null?"":task.inputJson)),now);
         }
     }
 
@@ -303,7 +315,7 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
     private AgentRunView view(RunState r){return new AgentRunView(r.runId,r.conversationId,r.ownerUserId,r.status,r.executionMode,r.routeReason,r.planId,r.lastEventSequence);}
     
     /** 执行该 Agent 运行时组件中的 taskView 操作。 */
-    private AgentTaskView taskView(TaskState t){return new AgentTaskView(t.taskId,t.taskKey,t.capabilityType,t.status,t.attempts,t.outputUri);}
+    private AgentTaskView taskView(TaskState t){return new AgentTaskView(t.taskId,t.taskKey,t.capabilityType,t.status,t.attempts,t.outputUri,t.inputJson);}
     
     /** 构造后续 Agent 处理所需的 sha 值。 */
     private String sha(String value){
@@ -320,10 +332,10 @@ public final class InMemoryAgentDagRepository implements AgentDagRepository {
     
     /** 实现 RunState 所代表的 Agent 运行时职责。 */
     private static final class RunState {
-        final String runId,conversationId,ownerUserId,executionMode,routeReason;
-        String status,planId;long lastEventSequence;final List<AgentRunEventView> events;Map<String,Set<String>> dependencyIndex=Map.of();
-        RunState(String runId,String conversationId,String ownerUserId,String status,String executionMode,String routeReason,String planId,long seq,List<AgentRunEventView> events,Instant ignored){
-            this.runId=runId;this.conversationId=conversationId;this.ownerUserId=ownerUserId;this.status=status;this.executionMode=executionMode;this.routeReason=routeReason;this.planId=planId;this.lastEventSequence=seq;this.events=events;
+        final String runId,conversationId,ownerUserId,executionMode,routeReason;final Instant startedAt;
+        String status,planId,message,fundCode;long lastEventSequence;final List<AgentRunEventView> events;Map<String,Set<String>> dependencyIndex=Map.of();
+        RunState(String runId,String conversationId,String ownerUserId,String status,String executionMode,String routeReason,String planId,long seq,List<AgentRunEventView> events,Instant startedAt){
+            this.runId=runId;this.conversationId=conversationId;this.ownerUserId=ownerUserId;this.status=status;this.executionMode=executionMode;this.routeReason=routeReason;this.planId=planId;this.lastEventSequence=seq;this.events=events;this.startedAt=startedAt;
         }
     }
     

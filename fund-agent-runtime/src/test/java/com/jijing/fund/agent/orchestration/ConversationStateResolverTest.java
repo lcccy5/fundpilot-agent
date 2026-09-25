@@ -44,4 +44,14 @@ class ConversationStateResolverTest {
         assertThat(state.periodStart()).isEqualTo(LocalDate.of(2025,1,1));
         assertThat(state.periodEnd()).isEqualTo(LocalDate.of(2025,12,31));
     }
+
+    @Test void mentioningTheCurrentYearDropsAStaleInheritedPeriod() {
+        Instant now=Instant.parse("2026-09-25T02:00:00Z");
+        var previous=new AgentConversationState("conversation","460300",java.util.List.of("460300"),
+                LocalDate.of(2025,8,25),LocalDate.of(2025,12,31),"METRICS",now.minusSeconds(60));
+        var state=new ConversationStateResolver().update(previous,"现在是2026年和我聊2025年?",now);
+        assertThat(state.periodStart()).isNull();
+        assertThat(state.periodEnd()).isNull();
+        assertThat(state.activeFund()).isEqualTo("460300");
+    }
 }

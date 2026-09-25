@@ -28,8 +28,10 @@ public final class RuleBasedPlanner {
         if(funds.isEmpty())funds=List.of("000001","110022","161725");
         boolean personal=text.contains("组合")||text.contains("我的");
         boolean export=text.contains("导出")||text.contains("发布")||text.contains("通知");
-        LocalDate endDate=LocalDate.now(clock);
-        LocalDate startDate=endDate.minusYears(1);
+        var stated=Pattern.compile("期间(\\d{4}-\\d{2}-\\d{2})至(\\d{4}-\\d{2}-\\d{2})").matcher(text);
+        boolean ranged=stated.find();
+        LocalDate endDate=ranged?LocalDate.parse(stated.group(2)):LocalDate.now(clock);
+        LocalDate startDate=ranged?LocalDate.parse(stated.group(1)):endDate.minusYears(1);
         List<PlanTaskDraft> tasks=new ArrayList<>();
         List<String> metricKeys=new ArrayList<>();
         for(String fund:funds){

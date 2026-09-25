@@ -3,6 +3,7 @@ package com.jijing.fund.application;
 import com.jijing.fund.application.dto.*;
 import com.jijing.fund.application.exception.FundNotFoundException;
 import com.jijing.fund.application.exception.InvalidFundQueryException;
+import com.jijing.fund.domain.event.DomainEventPublisher;
 import com.jijing.fund.domain.cache.FundQueryCache;
 import com.jijing.fund.domain.model.FundCode;
 import com.jijing.fund.domain.model.FundProfile;
@@ -14,6 +15,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Map;
 
 public class FundQueryApplicationService implements FundQueryUseCase {
     private final FundRepository fundRepository;
@@ -21,14 +23,30 @@ public class FundQueryApplicationService implements FundQueryUseCase {
     private final FundQueryCache cache;
     private final ExternalFundDataProvider provider;
     private final Clock clock;
+    private final DomainEventPublisher events;
 
     public FundQueryApplicationService(FundRepository fundRepository, FundNavRepository navRepository,
             FundQueryCache cache, ExternalFundDataProvider provider, Clock clock) {
+        this(fundRepository, navRepository, cache, provider, clock, DomainEventPublisher.NOOP);
+    }
+
+    public FundQueryApplicationService(FundRepository fundRepository, FundNavRepository navRepository,
+            FundQueryCache cache, ExternalFundDataProvider provider, Clock clock, DomainEventPublisher events) {
         this.fundRepository = fundRepository;
         this.navRepository = navRepository;
         this.cache = cache;
         this.provider = provider;
         this.clock = clock;
+        this.events = events == null ? DomainEventPublisher.NOOP : events;
+    }
+
+    @Override public java.util.List<FundSearchHit> searchByName(String name) {
+        String query = name == null ? "" : name.trim();
+        if (query.isEmpty() || query.length() > 40) throw new InvalidFundQueryException("fund name must contain 1 to 40 characters");
+        String escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        return fundRepository.searchByName(escaped, 8).stream()
+                .map(profile -> new FundSearchHit(profile.code().value(), profile.name(), profile.fundType()))
+                .toList();
     }
 
     @Override public FundProfileResult getProfile(String fundCode) {
@@ -81,6 +99,8 @@ public class FundQueryApplicationService implements FundQueryUseCase {
                 navRepository.upsertBatch(fetched);
                 LocalDate latest = fetched.stream().map(NavPoint::navDate).max(LocalDate::compareTo).orElseThrow();
                 fundRepository.incrementDataRevision(code, latest);
+                events.append("FUND_NAV_UPDATED", "fund", code.value(), null, "v1",
+                        "nav-" + code.value() + "-" + latest, Map.of("navDate", latest.toString(), "saved", fetched.size()));
                 var reloaded = navRepository.findHistory(code, start, end);
                 points = reloaded.isEmpty() ? fetched : reloaded;
             }

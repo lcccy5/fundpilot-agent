@@ -22,4 +22,14 @@ public final class InMemoryNotificationStore implements NotificationStore {
     public synchronized List<StoredNotification> listOwned(String ownerUserId){
         return records.stream().filter(r->r.ownerUserId().equals(ownerUserId)).toList();
     }
+    @Override public synchronized boolean markRead(String ownerUserId,String notificationId,Instant now){
+        for(int i=0;i<records.size();i++){
+            StoredNotification current=records.get(i);
+            if(current.notificationId().equals(notificationId)&&current.ownerUserId().equals(ownerUserId)){
+                records.set(i,new StoredNotification(current.notificationId(),current.ownerUserId(),current.ruleId(),current.fingerprint(),current.status(),current.createdAt(),current.readAt()==null?now:current.readAt()));
+                return true;
+            }
+        }
+        return false;
+    }
 }

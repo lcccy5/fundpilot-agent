@@ -82,8 +82,8 @@ public class FundAgentConfiguration {
     @Bean com.jijing.fund.agent.notification.NotificationDispatcher notificationDispatcher(com.jijing.fund.agent.notification.NotificationStore store){
         return new com.jijing.fund.agent.notification.NotificationDispatcher(store,new com.jijing.fund.agent.notification.InAppNotificationChannel());
     }
-    @Bean com.jijing.fund.agent.event.DomainEventDispatcher domainEventDispatcher(com.jijing.fund.agent.notification.NotificationDispatcher notifications){
-        return new com.jijing.fund.agent.event.DomainEventDispatcher(notifications);
+    @Bean com.jijing.fund.agent.event.DomainEventDispatcher domainEventDispatcher(com.jijing.fund.agent.notification.NotificationDispatcher notifications,org.springframework.beans.factory.ObjectProvider<com.jijing.fund.agent.port.AgentRuntimeRepository> memory){
+        return new com.jijing.fund.agent.event.DomainEventDispatcher(notifications,memory.getIfAvailable());
     }
     @Bean com.jijing.fund.agent.report.MonthlyReportLauncher monthlyReportLauncher(com.jijing.fund.agent.api.AgentRunUseCase runs,com.jijing.fund.agent.report.ReportJobStore jobs,java.time.Clock clock){
         return new com.jijing.fund.agent.report.MonthlyReportLauncher(runs,jobs,clock);

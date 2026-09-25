@@ -53,12 +53,12 @@ class FundApplicationConfiguration {
     @Bean SpreadsheetTableReader xlsxSpreadsheetTableReader(){return new com.jijing.fund.infrastructure.portfolio.XlsxSpreadsheetTableReader();}
     @Bean RiskProfileRepository riskProfileRepository(JdbcTemplate jdbc){return new com.jijing.fund.infrastructure.security.JdbcRiskProfileRepository(jdbc);}
     @Bean RiskProfileUseCase riskProfileUseCase(RiskProfileRepository repository,Clock clock){return new RiskProfileApplicationService(repository,clock);}
-    @Bean PortfolioUseCase portfolioUseCase(PortfolioRepository repository,FundNavRepository navs,PortfolioPositionProjector projector,MoneyWeightedReturnCalculator returns,TimeWeightedReturnCalculator twr,PortfolioConcentrationCalculator concentration,List<SpreadsheetTableReader> readers,ObjectMapper mapper,Clock clock){return new PortfolioApplicationService(repository,navs,projector,returns,twr,concentration,readers,mapper,clock);}
+    @Bean PortfolioUseCase portfolioUseCase(PortfolioRepository repository,FundNavRepository navs,PortfolioPositionProjector projector,MoneyWeightedReturnCalculator returns,TimeWeightedReturnCalculator twr,PortfolioConcentrationCalculator concentration,List<SpreadsheetTableReader> readers,ObjectMapper mapper,Clock clock,com.jijing.fund.domain.event.DomainEventPublisher events){return new PortfolioApplicationService(repository,navs,projector,returns,twr,concentration,readers,mapper,clock,events);}
 
     @Bean
     FundQueryUseCase fundQueryUseCase(FundRepository fundRepository, FundNavRepository navRepository,
-            FundQueryCache cache, ExternalFundDataProvider provider, Clock clock) {
-        return new FundQueryApplicationService(fundRepository, navRepository, cache, provider, clock);
+            FundQueryCache cache, ExternalFundDataProvider provider, Clock clock, com.jijing.fund.domain.event.DomainEventPublisher events) {
+        return new FundQueryApplicationService(fundRepository, navRepository, cache, provider, clock, events);
     }
 
     @Bean
@@ -86,8 +86,8 @@ class FundApplicationConfiguration {
     @Bean
     FundMetricsQueryUseCase fundMetricsQueryUseCase(FundRepository funds, FundNavRepository navs,
             TradingCalendarRepository calendar, FundMetricsCache cache, FundMetricsCalculator calculator,
-            CalculationContext context, ExternalFundDataProvider provider) {
-        return new FundMetricsQueryApplicationService(funds, navs, calendar, cache, calculator, context, provider);
+            CalculationContext context, ExternalFundDataProvider provider, com.jijing.fund.domain.event.DomainEventPublisher events) {
+        return new FundMetricsQueryApplicationService(funds, navs, calendar, cache, calculator, context, provider, events);
     }
 
     @Bean

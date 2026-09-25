@@ -1,6 +1,8 @@
 package com.jijing.fund.agent.event;
 
 import com.jijing.fund.agent.notification.NotificationDispatcher;
+import com.jijing.fund.agent.orchestration.FactMemoryRevision;
+import com.jijing.fund.agent.port.AgentRuntimeRepository;
 import java.time.Instant;
 import java.util.Set;
 
@@ -11,10 +13,12 @@ import java.util.Set;
 public final class DomainEventDispatcher {
     public static final Set<String> SUPPORTED_SCHEMAS=Set.of("v1");
     private final NotificationDispatcher notifications;
+    private final AgentRuntimeRepository memory;
     /**
      * 创建事件分发器，并注入用于投递业务通知的分发器。
      */
-    public DomainEventDispatcher(NotificationDispatcher notifications){this.notifications=notifications;}
+    public DomainEventDispatcher(NotificationDispatcher notifications){this(notifications,null);}
+    public DomainEventDispatcher(NotificationDispatcher notifications,AgentRuntimeRepository memory){this.notifications=notifications;this.memory=memory;}
     /**
      * 按事件类型处理已校验的领域事件。
      * 不支持的事件架构会被标记为死信；有效的回撤阈值事件会触发通知判断。
@@ -22,6 +26,16 @@ public final class DomainEventDispatcher {
     public Result dispatch(DomainEvent event,Instant now){
         if(event==null||event.schemaVersion()==null||!SUPPORTED_SCHEMAS.contains(event.schemaVersion()))
             return Result.deadLetter("UNKNOWN_SCHEMA");
+        if(memory!=null){
+            var categories=FactMemoryRevision.categoriesFor(event.eventType());
+            if(!categories.isEmpty()){
+                var subjects=new java.util.LinkedHashSet<String>();
+                if(event.aggregateId()!=null&&!event.aggregateId().isBlank())subjects.add(event.aggregateId());
+                Object portfolioId=event.payload()==null?null:event.payload().get("portfolioId");
+                if(portfolioId instanceof String id&&!id.isBlank())subjects.add(id);
+                for(String subject:subjects)memory.invalidateFactMemory(subject,categories);
+            }
+        }
         if("PORTFOLIO_DRAWDOWN_THRESHOLD_CROSSED".equals(event.eventType())&&event.ownerUserId()!=null){
             double previous=number(event.payload(),"previous",0);
             double current=number(event.payload(),"current",0);

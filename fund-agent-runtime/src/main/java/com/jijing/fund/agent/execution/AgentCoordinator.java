@@ -47,6 +47,7 @@ public final class AgentCoordinator implements AgentRunUseCase {
             throw new AgentInvalidArgumentException("durable runs require PLAN_AND_EXECUTE routing");
         String conversationId=command.conversationId()==null||command.conversationId().isBlank()?dag.createConversation(command.ownerUserId(),now):command.conversationId();
         String runId=dag.startRun(conversationId,command.ownerUserId(),command.requestId(),decision.mode().name(),decision.matchedRule(),now);
+        dag.rememberResearch(runId,command.ownerUserId(),trim(command.message()),fundCode(command.message()));
         dag.saveRoute(runId,command.ownerUserId(),decision,now);
         PlanDraft draft=planner.draft(command.message());
         validator.validate(draft,command.ownerUserId());
@@ -56,6 +57,7 @@ public final class AgentCoordinator implements AgentRunUseCase {
     @Override 
     /** 获取当前 Agent 操作所需的 get 结果。 */
     public AgentRunView get(String runId,String ownerUserId){return dag.requireOwnedRun(runId,ownerUserId);}
+    @Override public java.util.List<AgentResearchHistoryItem> list(String ownerUserId){return dag.listOwnedResearch(ownerUserId,30);}
     @Override 
     /** 获取当前 Agent 操作所需的 plan 结果。 */
     public AgentPlanView plan(String runId,String ownerUserId){return dag.requireOwnedPlan(runId,ownerUserId);}
@@ -78,9 +80,7 @@ public final class AgentCoordinator implements AgentRunUseCase {
     @Override 
     /** 执行 reject 对应的资源状态转换。 */
     public void reject(String runId,String approvalId,String ownerUserId){dag.requireOwnedRun(runId,ownerUserId);dag.rejectApproval(approvalId,ownerUserId,Instant.now());}
-    @Override 
-    /** 执行 recover 操作，并应用相应的 Agent 运行时状态变化。 */
-    public int recover(Instant now){
-        return dag.recoverExpiredLeases(now);
-    }
+    private static String trim(String message){String value=message.trim();return value.length()>500?value.substring(0,500):value;}
+    private static String fundCode(String message){var matcher=java.util.regex.Pattern.compile("(?<!\\d)(\\d{6})(?!\\d)").matcher(message);return matcher.find()?matcher.group(1):null;}
+    @Override public int recover(Instant now){return dag.recoverExpiredLeases(now);}
 }

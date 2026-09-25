@@ -1,8 +1,6 @@
 package com.jijing.fund.interfaces.web;
 
 import com.jijing.fund.agent.api.*;
-import com.jijing.fund.agent.verification.ReportWriter;
-import com.jijing.fund.agent.verification.VerificationReport;
 import com.jijing.fund.interfaces.api.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -20,7 +18,8 @@ import com.jijing.fund.domain.identity.AuthenticatedUser;
 public class FundAgentController {
     private final FundAgentUseCase useCase;
     private final AgentRunUseCase runs;
-    public FundAgentController(FundAgentUseCase useCase,AgentRunUseCase runs){this.useCase=useCase;this.runs=runs;}
+    private final ReadableResearchReport reports;
+    public FundAgentController(FundAgentUseCase useCase,AgentRunUseCase runs,ReadableResearchReport reports){this.useCase=useCase;this.runs=runs;this.reports=reports;}
 
     @PostMapping("/conversations")
     public ApiResponse<ConversationResult> create(@CurrentUser AuthenticatedUser actor,HttpServletRequest request){return ApiResponse.success(RequestIdFilter.get(request),useCase.createConversation(actor));}
@@ -36,6 +35,10 @@ public class FundAgentController {
                 .map(event->{var builder=ServerSentEvent.builder(event).event(event.type());if(event.runId()!=null)builder.id(event.runId());return builder.build();});
     }
 
+    @GetMapping("/runs")
+    public ApiResponse<java.util.List<AgentResearchHistoryItem>> listRuns(@CurrentUser AuthenticatedUser actor,HttpServletRequest request){
+        return ApiResponse.success(RequestIdFilter.get(request),runs.list(actor.userId().value()));
+    }
     @PostMapping("/runs")
     public ApiResponse<AgentRunView> submitRun(@CurrentUser AuthenticatedUser actor,@Valid @RequestBody RunRequest body,HttpServletRequest request){
         return ApiResponse.success(RequestIdFilter.get(request),runs.submit(new AgentRunCommand(body.conversationId(),body.message(),RequestIdFilter.get(request),actor.userId().value(),true)));
@@ -55,7 +58,7 @@ public class FundAgentController {
         var writer=plan.tasks().stream().filter(task->"REPORT_WRITE".equals(task.capabilityType())&&"SUCCEEDED".equals(task.status())&&task.outputUri()!=null).findFirst()
                 .orElseThrow(()->new IllegalStateException("research report is not ready"));
         var evidence=plan.tasks().stream().filter(task->"SUCCEEDED".equals(task.status())&&task.outputUri()!=null).map(AgentTaskView::outputUri).toList();
-        String content=new ReportWriter().write(new VerificationReport(true,java.util.List.of(),evidence),plan.tasks());
+        String content=reports.write(actor,plan);
         return ApiResponse.success(RequestIdFilter.get(request),new ResearchReport(writer.outputUri(),content,evidence.size()));
     }
     @GetMapping("/runs/{runId}/events")

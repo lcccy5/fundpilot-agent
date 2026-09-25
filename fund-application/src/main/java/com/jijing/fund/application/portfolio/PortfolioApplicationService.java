@@ -4,6 +4,7 @@ import com.jijing.fund.analytics.portfolio.*;
 import com.jijing.fund.domain.identity.*;
 import com.jijing.fund.domain.model.*;
 import com.jijing.fund.domain.portfolio.*;
+import com.jijing.fund.domain.event.DomainEventPublisher;
 import com.jijing.fund.domain.repository.FundNavRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.*;
@@ -18,12 +19,18 @@ public class PortfolioApplicationService implements PortfolioUseCase {
     private static final int MAX_IMPORT_ROWS=2000;
     private final PortfolioRepository portfolios;private final FundNavRepository navs;private final PortfolioPositionProjector projector;
     private final MoneyWeightedReturnCalculator xirr;private final TimeWeightedReturnCalculator twr;private final PortfolioConcentrationCalculator concentration;
-    private final List<SpreadsheetTableReader> readers;private final ObjectMapper json;private final Clock clock;
+    private final List<SpreadsheetTableReader> readers;private final ObjectMapper json;private final Clock clock;private final DomainEventPublisher events;
     public PortfolioApplicationService(PortfolioRepository portfolios,FundNavRepository navs,PortfolioPositionProjector projector,
             MoneyWeightedReturnCalculator xirr,TimeWeightedReturnCalculator twr,PortfolioConcentrationCalculator concentration,
             List<SpreadsheetTableReader> readers,ObjectMapper json,Clock clock){
+        this(portfolios,navs,projector,xirr,twr,concentration,readers,json,clock,DomainEventPublisher.NOOP);
+    }
+    public PortfolioApplicationService(PortfolioRepository portfolios,FundNavRepository navs,PortfolioPositionProjector projector,
+            MoneyWeightedReturnCalculator xirr,TimeWeightedReturnCalculator twr,PortfolioConcentrationCalculator concentration,
+            List<SpreadsheetTableReader> readers,ObjectMapper json,Clock clock,DomainEventPublisher events){
         this.portfolios=portfolios;this.navs=navs;this.projector=projector;this.xirr=xirr;this.twr=twr;this.concentration=concentration;
         this.readers=readers==null?List.of(new CsvSpreadsheetTableReader()):List.copyOf(readers);this.json=json==null?new ObjectMapper():json;this.clock=clock;
+        this.events=events==null?DomainEventPublisher.NOOP:events;
     }
     @Override public List<UserPortfolio> list(AuthenticatedUser actor){return portfolios.findByOwner(actor.userId());}
     @Override @Transactional public UserPortfolio create(AuthenticatedUser actor,String name){String display=required(name);Instant now=clock.instant();var p=new UserPortfolio(PortfolioId.random(),actor.userId(),display,"CNY",PortfolioStatus.ACTIVE,0,now,now);portfolios.savePortfolio(p);return p;}
@@ -114,6 +121,7 @@ public class PortfolioApplicationService implements PortfolioUseCase {
         List<FundTransaction> candidate=new ArrayList<>(portfolios.findTransactions(portfolio.portfolioId(),actor.userId()));candidate.addAll(txs);projector.project(candidate);
         if(!portfolios.updateVersion(portfolio.portfolioId(),actor.userId(),portfolio.version(),portfolio.version()+1))throw new PortfolioConflictException("portfolio was updated concurrently");
         txs.forEach(portfolios::appendTransaction);
+        for(FundTransaction tx:txs)events.append("PORTFOLIO_TRANSACTION_RECORDED","fund",tx.fundCode().value(),actor.userId().value(),"v1","tx-"+tx.transactionId(),Map.of("portfolioId",portfolio.portfolioId().value()));
         String hash=sha(candidate.stream().map(FundTransaction::transactionId).toList().toString());
         portfolios.replacePositionSnapshots(portfolio.portfolioId(),actor.userId(),LocalDate.now(clock),projector.project(candidate),hash);
     }
