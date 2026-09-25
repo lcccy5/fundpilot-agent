@@ -306,18 +306,48 @@ function NavRangeSelector({ range, loading, onRangeChange }: { range: NavRange; 
 function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; hasFund: boolean; onRangeChange: (range: NavRange) => void }) {
   const chart = useMemo(() => navChartSegments(points), [points]);
   const p = chart.points;
-  const plotRef = useRef<HTMLDivElement>(null);
-  const [plotWidth, setPlotWidth] = useState(640);
+  const plotRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   useEffect(() => {
-    const node = plotRef.current;
-    if (!node) return;
-    const update = () => setPlotWidth(Math.max(280, Math.round(node.clientWidth)));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
+    const canvas = plotRef.current;
+    if (!canvas || p.length < 2) return;
+    const draw = () => {
+      const width = Math.max(280, Math.round(canvas.clientWidth));
+      const height = 220;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = "#e9eef6";
+      ctx.lineWidth = 1;
+      for (const gy of [18, 42, 66, 90]) {
+        const y = (gy / 100) * height;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.strokeStyle = "#286fda";
+      ctx.lineWidth = 1.75;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      p.forEach((point, index) => {
+        const x = (point.x / 100) * width;
+        const y = (point.y / 100) * height;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    };
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvas);
     return () => observer.disconnect();
-  }, [p.length]);
+  }, [p]);
   if (p.length < 2)
     return (
       <><div className="empty-chart">{loading?'正在加载区间净值…':hasFund?'这个区间没有足够的净值来画走势。':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
@@ -326,7 +356,7 @@ function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav
   const last = Number(p.at(-1)?.unitNav);
   const first = Number(p[0].unitNav);
   const change = ((last - first) / first) * 100;
-  const locate = (event: PointerEvent<SVGSVGElement>) => {
+  const locate = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     if (rect.width <= 0) return;
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) * 100;
@@ -349,12 +379,7 @@ function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav
           <span style={{ position: "absolute", top: "54%", right: 0, transform: "translateY(-50%)" }}>{((chart.max + chart.min) / 2).toFixed(4)}</span>
           <span style={{ position: "absolute", top: "90%", right: 0, transform: "translateY(-50%)" }}>{chart.min.toFixed(4)}</span>
         </div>
-        <div ref={plotRef}>
-          <svg width="100%" height="220" viewBox={`0 0 ${plotWidth} 220`} onPointerMove={locate} onPointerLeave={() => setHover(null)}>
-            {[18,42,66,90].map(y=><line key={y} x1="0" x2={plotWidth} y1={(y / 100) * 220} y2={(y / 100) * 220} className="chart-grid-line" />)}
-            <path d={p.map((point, index) => `${index === 0 ? "M" : "L"} ${((point.x / 100) * plotWidth).toFixed(1)} ${((point.y / 100) * 220).toFixed(1)}`).join(" ")} fill="none" stroke="#286fda" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
-          </svg>
-        </div>
+        <canvas ref={plotRef} style={{ width: "100%", height: 220, display: "block" }} onPointerMove={locate} onPointerLeave={() => setHover(null)} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginLeft: 80, marginTop: 6, color: "#7b8798", fontSize: 12 }}>
         <span>{p[0].navDate}</span>
