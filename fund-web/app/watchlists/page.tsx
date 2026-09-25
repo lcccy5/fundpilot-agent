@@ -45,7 +45,7 @@ export default function WatchlistsPage(){
   const localCodes=guestWatch();
   const total=useMemo(()=>groups.reduce((sum,group)=>sum+group.items.length,0),[groups]);
   return <AppShell notice={notice}><section className="workspace watchlist-page">
-    <div className="watchlist-title"><div><p>WATCHLIST</p><h2>我的自选</h2><span>集中查看你关注的基金，从这里继续研究。</span></div><div className="watchlist-total"><b>{total}</b><small>只基金 · {groups.length} 个分组</small></div></div>
+    <div className="watchlist-title"><div><p>WATCHLIST</p><h2>我的自选</h2><span>集中查看你关注的基金，从这里继续研究。</span></div><div className="watchlist-total"><b>{failed?'—':total}</b><small>{failed?'数量未加载':`只基金 · ${groups.length} 个分组`}</small></div></div>
     {localCodes.length>0&&<section className="local-watch"><div><b>此设备还有 {localCodes.length} 只自选未同步</b><small>{localCodes.join('、')} · 同步后换设备也能看到</small></div><button className="primary" onClick={merge}>同步到我的账户</button></section>}
     {loading?<div className="empty-panel">正在加载自选基金…</div>:failed?<div className="empty-panel"><b>自选暂时加载失败</b><span>请稍后重试。这不是一份空的自选。</span></div>:groups.length?<div className="watch-groups">{groups.map(group=><section key={group.groupId} className="watch-group">
       <div className="group-heading"><div><b>{group.displayName}</b><small>{group.items.length} 只基金</small></div></div>

@@ -1,7 +1,14 @@
-/** Same-site return path. Off-site and protocol-relative values stay on the home page. */
+/** Same-site return path. Off-site, protocol-relative, and slash-backslash values stay on the fallback page. */
 export function safeNext(search, fallback = '/') {
   const next = new URLSearchParams(search ?? '').get('next') ?? fallback;
-  return next.startsWith('/') && !next.startsWith('//') ? next : fallback;
+  if (!next.startsWith('/') || next.startsWith('//') || /[\u0000-\u001F\u007F\\]/.test(next)) return fallback;
+  try {
+    const url = new URL(next, 'https://fundpilot.local');
+    if (url.origin !== 'https://fundpilot.local') return fallback;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 export function noticeTone(notice) {

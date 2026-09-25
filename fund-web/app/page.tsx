@@ -303,14 +303,15 @@ function NavRangeSelector({ range, loading, onRangeChange }: { range: NavRange; 
   return <div className="chart-ranges" aria-label="净值时间范围">{NAV_RANGES.map(option=><button type="button" key={option.value} className={range===option.value?'active':''} disabled={loading} aria-pressed={range===option.value} onClick={()=>onRangeChange(option.value)}>{option.label}</button>)}</div>;
 }
 
-function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; onRangeChange: (range: NavRange) => void }) {
+function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; hasFund: boolean; onRangeChange: (range: NavRange) => void }) {
   const chart = useMemo(() => navChartSegments(points), [points]);
   const p = chart.points;
   const [hover, setHover] = useState<number | null>(null);
   if (p.length < 2)
     return (
-      <><div className="empty-chart">{loading?'正在加载区间净值…':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
+      <><div className="empty-chart">{loading?'正在加载区间净值…':hasFund?'这个区间没有足够的净值来画走势。':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
     );
+  const middle = p.reduce((best, point) => Math.abs(point.x - 50) < Math.abs(best.x - 50) ? point : best, p[0]);
   const last = Number(p.at(-1)?.unitNav);
   const first = Number(p[0].unitNav);
   const change = ((last - first) / first) * 100;
@@ -335,11 +336,11 @@ function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range
         {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
         {chart.segments.map(segment => <path key={segment} d={segment} fill="none" stroke="#286fda" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
       </svg>
-      <div className="chart-scale"><span>{chart.max.toFixed(4)}</span><span>{chart.min.toFixed(4)}</span></div>
-      <div className="dates">
-        <span>{p[0].navDate}</span>
-        <span>{p[Math.floor(p.length / 2)].navDate}</span>
-        <span>{p.at(-1)?.navDate}</span>
+      <div className="chart-scale"><span>最高 {chart.max.toFixed(4)}</span><span>最低 {chart.min.toFixed(4)}</span></div>
+      <div className="dates chart-dates">
+        <span style={{ left: `${p[0].x}%` }}>{p[0].navDate}</span>
+        <span style={{ left: `${middle.x}%` }}>{middle.navDate}</span>
+        <span style={{ left: `${p.at(-1)?.x ?? 100}%` }}>{p.at(-1)?.navDate}</span>
       </div>
       {hover != null && p[hover] && <div className="chart-readout">{p[hover].navDate} · 单位净值 {Number(p[hover].unitNav).toFixed(4)}</div>}
       <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
@@ -369,14 +370,17 @@ export default function Home() {
     [watchSaving, setWatchSaving] = useState(false),
     [watchedCode, setWatchedCode] = useState<string>();
   const agentRef = useRef<HTMLElement>(null);
-  const requestSeq = useRef(0);
+  const fundSeq = useRef(0);
+  const rangeSeq = useRef(0);
   const stopRef = useRef(false);
   const runIdRef = useRef("");
   const cancelSentRef = useRef(false);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   /** Loads profile and NAV together so the detail view never mixes two funds. */
   const loadFund = useCallback(async (id: string) => {
-    const seq = ++requestSeq.current;
+    const seq = ++fundSeq.current;
+    rangeSeq.current += 1;
+    setNavLoading(false);
     const { startDate, endDate } = currentNavWindow("1y");
     setCode(id);
     setFund(null);
@@ -393,7 +397,7 @@ export default function Home() {
           msg?: string;
           data?: Fund;
         }>(a);
-      if (seq !== requestSeq.current) return;
+      if (seq !== fundSeq.current) return;
       if (!a.ok)
         throw Error(profile.message ?? profile.msg ?? "基金资料暂不可用");
       const loadedFund=profile.data ?? (profile as Fund);
@@ -403,32 +407,32 @@ export default function Home() {
       setTab("overview");
       setNotice(navPoints.at(-1) ? `已更新至 ${navPoints.at(-1)?.navDate}` : "已加载基金资料，这个区间没有净值");
     } catch (x) {
-      if (seq !== requestSeq.current) return;
+      if (seq !== fundSeq.current) return;
       setNotice(x instanceof Error ? x.message : "查询失败");
     } finally {
-      if (seq === requestSeq.current) setLoading(false);
+      if (seq === fundSeq.current) setLoading(false);
     }
   }, []);
   const changeNavRange = async (nextRange: NavRange) => {
     if (!fund || nextRange === navRange || navLoading) return;
-    const seq = ++requestSeq.current;
     const fundCode = fund.fundCode;
     const previousRange = navRange;
+    const seq = ++rangeSeq.current;
     const { startDate, endDate } = currentNavWindow(nextRange);
     setNavRange(nextRange);
     setNavLoading(true);
     setNotice(`正在加载${NAV_RANGES.find(option=>option.value===nextRange)?.label}净值…`);
     try {
       const nextPoints = await requestFreshNavPoints(fundCode, startDate, endDate);
-      if (seq !== requestSeq.current) return;
+      if (seq !== rangeSeq.current) return;
       setPoints(nextPoints);
       setNotice(`已切换至${NAV_RANGES.find(option=>option.value===nextRange)?.label}走势`);
     } catch (x) {
-      if (seq !== requestSeq.current) return;
+      if (seq !== rangeSeq.current) return;
       setNavRange(previousRange);
       setNotice(x instanceof Error ? x.message : "区间切换失败");
     } finally {
-      if (seq === requestSeq.current) setNavLoading(false);
+      if (seq === rangeSeq.current) setNavLoading(false);
     }
   };
   const sync = async (e?: FormEvent) => {
@@ -735,7 +739,7 @@ export default function Home() {
           <p>NET ASSET VALUE</p>
           <h3>单位净值走势</h3>
           <small className="data-caption">净值变化不等同于实际持有收益；区间以图表日期为准。</small>
-          <Chart points={points} range={navRange} loading={navLoading} onRangeChange={changeNavRange} />
+          <Chart points={points} range={navRange} loading={navLoading} hasFund={Boolean(fund)} onRangeChange={changeNavRange} />
         </article>
         <article className="card profile">
           <p>FUND PROFILE</p>
@@ -796,7 +800,7 @@ export default function Home() {
             </b>
           </div>
         </div>
-        <Chart points={points} range={navRange} loading={navLoading} onRangeChange={changeNavRange} />
+        <Chart points={points} range={navRange} loading={navLoading} hasFund={Boolean(fund)} onRangeChange={changeNavRange} />
       </section>
     );
   if (tab === "knowledge")
