@@ -68,7 +68,16 @@ const checks = [
   ['shell reports title', () => assert.equal(shellTitle('/reports')[1], '月度回顾')],
   ['shell unknown title', () => assert.equal(shellTitle('/nope')[1], '基金研究')],
   ['weekend gap stays connected', () => assert.equal(navChartSegments([{ navDate: '2026-01-02', unitNav: 1 }, { navDate: '2026-01-05', unitNav: 1.1 }]).segments.length, 1)],
-  ['long gap breaks', () => assert.equal(navChartSegments([{ navDate: '2026-01-02', unitNav: 1 }, { navDate: '2026-01-20', unitNav: 1.2 }]).segments.length, 2)],
+  ['long gap stays one line', () => {
+    const chart = navChartSegments([{ navDate: '2026-01-02', unitNav: 1 }, { navDate: '2026-01-20', unitNav: 1.2 }]);
+    assert.equal(chart.segments.length, 1);
+    assert.equal(chart.gaps.length, 1);
+    assert.equal((chart.segments[0].match(/M /g) ?? []).length, 1);
+  }],
+  ['max is above min', () => {
+    const chart = navChartSegments([{ navDate: '2026-01-02', unitNav: 1 }, { navDate: '2026-01-05', unitNav: 2 }]);
+    assert.ok(chart.points[1].y < chart.points[0].y);
+  }],
   ['chart has no curve command', () => assert.doesNotMatch(navChartSegments([{ navDate: '2026-01-02', unitNav: 1 }, { navDate: '2026-01-05', unitNav: 1.1 }]).segments.join(' '), / C /)],
   ['chart x follows dates', () => {
     const chart = navChartSegments([{ navDate: '2026-01-02', unitNav: 1 }, { navDate: '2026-01-05', unitNav: 1 }, { navDate: '2026-01-20', unitNav: 1 }]);

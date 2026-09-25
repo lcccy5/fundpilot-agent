@@ -39,12 +39,15 @@
 .notice-success{border-color:#cfe8da;background:#f3fbf6;color:#1f7a52}
 .notice-info{border-color:#e4e9f2;background:#f7f9fc;color:#526178}
 .questionnaire label.unanswered{outline:2px solid #d95555;outline-offset:4px;border-radius:10px;background:#fff8f8}
-.chart-scale{display:flex;justify-content:space-between;color:#96a49e;font-size:11px;margin-top:4px}
-.chart-dates{position:relative;display:block;height:18px}
+.chart-plot{display:grid;grid-template-columns:58px 1fr;gap:8px;align-items:stretch}
+.chart-y{position:relative;height:220px;color:#96a49e;font-size:11px}
+.chart-y span{position:absolute;right:0;transform:translateY(-50%);white-space:nowrap}
+.chart-dates{position:relative;display:block;height:18px;margin-left:66px}
 .chart-dates span{position:absolute;white-space:nowrap;transform:translateX(-50%)}
 .chart-dates span:first-child{transform:none}
 .chart-dates span:last-child{transform:translateX(-100%)}
-.chart-readout{margin-top:8px;font-size:13px;color:#244f9c;font-weight:700}
+.chart-readout{margin:8px 0 0 66px;font-size:13px;color:#244f9c;font-weight:700}
+.chart-gap-note{margin:6px 0 0 66px;color:#8a93a6;font-size:12px;line-height:1.5}
 .import-errors{margin:12px 0 0;padding-left:18px;color:#8f3d3d;font-size:13px;display:grid;gap:6px}
 .agent form button.agent-stop{width:auto;min-width:64px;padding:0 12px;font-size:13px;font-weight:700}
 .agent-activity.stopped>summary{color:#8a5a12}

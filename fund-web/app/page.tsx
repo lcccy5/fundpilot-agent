@@ -332,16 +332,23 @@ function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav
           {change.toFixed(2)}% · 区间单位净值变化
         </span>
       </div>
-      <svg className="real-chart" viewBox="0 0 100 100" preserveAspectRatio="none" onPointerMove={locate} onPointerLeave={() => setHover(null)}>
-        {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
-        {chart.segments.map(segment => <path key={segment} d={segment} fill="none" stroke="#286fda" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
-      </svg>
-      <div className="chart-scale"><span>最高 {chart.max.toFixed(4)}</span><span>最低 {chart.min.toFixed(4)}</span></div>
+      <div className="chart-plot">
+        <div className="chart-y" aria-hidden="true">
+          <span style={{ top: "18%" }}>{chart.max.toFixed(4)}</span>
+          <span style={{ top: "54%" }}>{((chart.max + chart.min) / 2).toFixed(4)}</span>
+          <span style={{ top: "90%" }}>{chart.min.toFixed(4)}</span>
+        </div>
+        <svg className="real-chart" viewBox="0 0 100 100" preserveAspectRatio="none" onPointerMove={locate} onPointerLeave={() => setHover(null)}>
+          {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
+          {chart.segments.map(segment => <path key={segment} d={segment} fill="none" stroke="#286fda" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />)}
+        </svg>
+      </div>
       <div className="dates chart-dates">
         <span style={{ left: `${p[0].x}%` }}>{p[0].navDate}</span>
-        <span style={{ left: `${middle.x}%` }}>{middle.navDate}</span>
+        {middle !== p[0] && middle !== p.at(-1) && <span style={{ left: `${middle.x}%` }}>{middle.navDate}</span>}
         <span style={{ left: `${p.at(-1)?.x ?? 100}%` }}>{p.at(-1)?.navDate}</span>
       </div>
+      {chart.gaps.length > 0 && <p className="chart-gap-note">有 {chart.gaps.length} 段间隔超过一个周末。曲线只连接已公布的净值，没有把空档补成数据。</p>}
       {hover != null && p[hover] && <div className="chart-readout">{p[hover].navDate} · 单位净值 {Number(p[hover].unitNav).toFixed(4)}</div>}
       <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
     </>
@@ -703,7 +710,7 @@ export default function Home() {
           <h2>{fund?.name ?? "查净值、看风险，再做决定"}</h2>
           <p>
             {fund?.fundType ??
-              "输入基金名称或 6 位代码，查看公开净值与研究依据。"}
+              "输入 6 位基金代码，查看公开净值与研究依据。"}
           </p>
           <mark>{fund?.fundCode ?? "基金代码"}</mark>
           {fund?.managementCompany && <mark>{fund.managementCompany}</mark>}
