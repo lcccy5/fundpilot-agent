@@ -306,7 +306,18 @@ function NavRangeSelector({ range, loading, onRangeChange }: { range: NavRange; 
 function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; hasFund: boolean; onRangeChange: (range: NavRange) => void }) {
   const chart = useMemo(() => navChartSegments(points), [points]);
   const p = chart.points;
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [plotWidth, setPlotWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
+  useEffect(() => {
+    const node = plotRef.current;
+    if (!node) return;
+    const update = () => setPlotWidth(Math.max(280, Math.round(node.clientWidth)));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [p.length]);
   if (p.length < 2)
     return (
       <><div className="empty-chart">{loading?'正在加载区间净值…':hasFund?'这个区间没有足够的净值来画走势。':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
@@ -338,18 +349,19 @@ function Chart({ points, range, loading, hasFund, onRangeChange }: { points: Nav
           <span style={{ position: "absolute", top: "54%", right: 0, transform: "translateY(-50%)" }}>{((chart.max + chart.min) / 2).toFixed(4)}</span>
           <span style={{ position: "absolute", top: "90%", right: 0, transform: "translateY(-50%)" }}>{chart.min.toFixed(4)}</span>
         </div>
-        <svg className="real-chart" viewBox="0 0 100 100" preserveAspectRatio="none" onPointerMove={locate} onPointerLeave={() => setHover(null)}>
-          {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
-          {chart.segments.map(segment => <path key={segment} d={segment} fill="none" stroke="#286fda" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />)}
-        </svg>
+        <div ref={plotRef}>
+          <svg width="100%" height="220" viewBox={`0 0 ${plotWidth} 220`} onPointerMove={locate} onPointerLeave={() => setHover(null)}>
+            {[18,42,66,90].map(y=><line key={y} x1="0" x2={plotWidth} y1={(y / 100) * 220} y2={(y / 100) * 220} className="chart-grid-line" />)}
+            <path d={p.map((point, index) => `${index === 0 ? "M" : "L"} ${((point.x / 100) * plotWidth).toFixed(1)} ${((point.y / 100) * 220).toFixed(1)}`).join(" ")} fill="none" stroke="#286fda" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
+          </svg>
+        </div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginLeft: 80, marginTop: 6, color: "#7b8798", fontSize: 12 }}>
         <span>{p[0].navDate}</span>
         {middle !== p[0] && middle !== p.at(-1) ? <span>{middle.navDate}</span> : <span />}
         <span>{p.at(-1)?.navDate}</span>
       </div>
-      {chart.gaps.length > 0 && <p style={{ margin: "6px 0 0 80px", color: "#8a93a6", fontSize: 12, lineHeight: 1.5 }}>有 {chart.gaps.length} 段间隔超过一个周末。曲线只连接已公布的净值，没有把空档补成数据。</p>}
-      {hover != null && p[hover] && <div className="chart-readout">{p[hover].navDate} · 单位净值 {Number(p[hover].unitNav).toFixed(4)}</div>}
+      {hover != null && p[hover] && <div style={{ margin: "8px 0 0 80px", color: "#244f9c", fontSize: 13, fontWeight: 700 }}>{p[hover].navDate} · 单位净值 {Number(p[hover].unitNav).toFixed(4)}</div>}
       <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
     </>
   );
