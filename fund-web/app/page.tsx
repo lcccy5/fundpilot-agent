@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "../components/AppShell";
 import {
   api,
@@ -10,6 +10,7 @@ import {
   restoreSession,
   saveGuestWatch,
 } from "../lib/session";
+import { acceptDelta, navChartSegments } from "../lib/polish.mjs";
 const API = process.env.NEXT_PUBLIC_API_BASE ?? "";
 type Fund = {
   fundCode: string;
@@ -63,7 +64,7 @@ type Msg = {
   runSummary?: RunSummary;
   summaryUnavailable?: boolean;
   activity?: {
-    status: "running" | "completed" | "failed";
+    status: "running" | "completed" | "failed" | "stopped";
     steps: { text: string; failed?: boolean }[];
   };
 };
@@ -219,7 +220,9 @@ function RunActivityPanel({ message }: { message: Msg }) {
         ? `正在运行${lastStep ? ` · ${lastStep}` : ""}`
         : activity?.status === "failed"
           ? `运行未完成 · ${activity.steps.length} 个步骤`
-          : `运行已完成 · ${activity?.steps.length ?? 0} 个步骤${summary ? ` · ${summary.evidenceCount} 条证据` : ""}`;
+          : activity?.status === "stopped"
+            ? "已停止"
+            : `运行已完成 · ${activity?.steps.length ?? 0} 个步骤${summary ? ` · ${summary.evidenceCount} 条证据` : ""}`;
   return (
     <details className={`agent-activity ${activity?.status ?? "completed"}`}>
       <summary><span>{compactLabel}</span></summary>
@@ -301,70 +304,44 @@ function NavRangeSelector({ range, loading, onRangeChange }: { range: NavRange; 
 }
 
 function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; onRangeChange: (range: NavRange) => void }) {
-  const p = useMemo(
-    () =>
-      points.filter(
-        (_, i) =>
-          i % Math.max(1, Math.ceil(points.length / 120)) === 0 ||
-          i === points.length - 1,
-      ),
-    [points],
-  );
+  const chart = useMemo(() => navChartSegments(points), [points]);
+  const p = chart.points;
+  const [hover, setHover] = useState<number | null>(null);
   if (p.length < 2)
     return (
       <><div className="empty-chart">{loading?'正在加载区间净值…':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
     );
-  const v = p.map((x) => +x.unitNav),
-    min = Math.min(...v),
-    max = Math.max(...v),
-    r = max - min || 1,
-    coordinates = p.map((x, i) => ({
-      x: (i / (p.length - 1)) * 100,
-      y: 90 - ((+x.unitNav - min) / r) * 72,
-    })),
-    d = coordinates.reduce((path, point, i, all) => {
-      if (i === 0) return `M ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
-      const previous = all[i - 1], before = all[i - 2] ?? previous, after = all[i + 1] ?? point;
-      const c1x = previous.x + (point.x - before.x) / 6;
-      const lowerY = Math.min(previous.y, point.y), upperY = Math.max(previous.y, point.y);
-      const c1y = Math.max(lowerY, Math.min(upperY, previous.y + (point.y - before.y) / 6));
-      const c2x = point.x - (after.x - previous.x) / 6;
-      const c2y = Math.max(lowerY, Math.min(upperY, point.y - (after.y - previous.y) / 6));
-      return `${path} C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
-    }, ""),
-    change = ((v.at(-1)! - v[0]) / v[0]) * 100;
+  const last = Number(p.at(-1)?.unitNav);
+  const first = Number(p[0].unitNav);
+  const change = ((last - first) / first) * 100;
+  const locate = (event: PointerEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) * 100;
+    let nearest = 0;
+    for (let index = 1; index < p.length; index += 1) if (Math.abs(p[index].x - ratio) < Math.abs(p[nearest].x - ratio)) nearest = index;
+    setHover(nearest);
+  };
   return (
     <>
       <div className="chart-meta">
-        <b>{v.at(-1)?.toFixed(4)}</b>
+        <b>{last.toFixed(4)}</b>
         <span className={change >= 0 ? "up" : "down"}>
           {change >= 0 ? "+" : ""}
           {change.toFixed(2)}% · 区间单位净值变化
         </span>
       </div>
-      <svg
-        className="real-chart"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-      >
-        <defs><linearGradient id="nav-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2d78ed" stopOpacity=".22"/><stop offset="100%" stopColor="#2d78ed" stopOpacity=".025"/></linearGradient></defs>
+      <svg className="real-chart" viewBox="0 0 100 100" preserveAspectRatio="none" onPointerMove={locate} onPointerLeave={() => setHover(null)}>
         {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
-        <path d={`${d} L 100 96 L 0 96 Z`} fill="url(#nav-area)" />
-        <path
-          d={d}
-          fill="none"
-          stroke="#286fda"
-          strokeWidth="1.6"
-          vectorEffect="non-scaling-stroke"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        {chart.segments.map(segment => <path key={segment} d={segment} fill="none" stroke="#286fda" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
       </svg>
+      <div className="chart-scale"><span>{chart.max.toFixed(4)}</span><span>{chart.min.toFixed(4)}</span></div>
       <div className="dates">
         <span>{p[0].navDate}</span>
         <span>{p[Math.floor(p.length / 2)].navDate}</span>
         <span>{p.at(-1)?.navDate}</span>
       </div>
+      {hover != null && p[hover] && <div className="chart-readout">{p[hover].navDate} · 单位净值 {Number(p[hover].unitNav).toFixed(4)}</div>}
       <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
     </>
   );
@@ -392,10 +369,18 @@ export default function Home() {
     [watchSaving, setWatchSaving] = useState(false),
     [watchedCode, setWatchedCode] = useState<string>();
   const agentRef = useRef<HTMLElement>(null);
+  const requestSeq = useRef(0);
+  const stopRef = useRef(false);
+  const runIdRef = useRef("");
+  const cancelSentRef = useRef(false);
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   /** Loads profile and NAV together so the detail view never mixes two funds. */
   const loadFund = useCallback(async (id: string) => {
+    const seq = ++requestSeq.current;
     const { startDate, endDate } = currentNavWindow("1y");
     setCode(id);
+    setFund(null);
+    setPoints([]);
     setLoading(true);
     setNotice("正在读取基金资料与历史净值…");
     try {
@@ -408,6 +393,7 @@ export default function Home() {
           msg?: string;
           data?: Fund;
         }>(a);
+      if (seq !== requestSeq.current) return;
       if (!a.ok)
         throw Error(profile.message ?? profile.msg ?? "基金资料暂不可用");
       const loadedFund=profile.data ?? (profile as Fund);
@@ -415,33 +401,40 @@ export default function Home() {
       setPoints(navPoints);
       setNavRange("1y");
       setTab("overview");
-      setNotice("已加载公开基金资料 · 数据仅供研究参考");
+      setNotice(navPoints.at(-1) ? `已更新至 ${navPoints.at(-1)?.navDate}` : "已加载基金资料，这个区间没有净值");
     } catch (x) {
+      if (seq !== requestSeq.current) return;
       setNotice(x instanceof Error ? x.message : "查询失败");
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, []);
   const changeNavRange = async (nextRange: NavRange) => {
     if (!fund || nextRange === navRange || navLoading) return;
+    const seq = ++requestSeq.current;
+    const fundCode = fund.fundCode;
     const previousRange = navRange;
     const { startDate, endDate } = currentNavWindow(nextRange);
     setNavRange(nextRange);
     setNavLoading(true);
     setNotice(`正在加载${NAV_RANGES.find(option=>option.value===nextRange)?.label}净值…`);
     try {
-      setPoints(await requestFreshNavPoints(fund.fundCode, startDate, endDate));
+      const nextPoints = await requestFreshNavPoints(fundCode, startDate, endDate);
+      if (seq !== requestSeq.current) return;
+      setPoints(nextPoints);
       setNotice(`已切换至${NAV_RANGES.find(option=>option.value===nextRange)?.label}走势`);
     } catch (x) {
+      if (seq !== requestSeq.current) return;
       setNavRange(previousRange);
       setNotice(x instanceof Error ? x.message : "区间切换失败");
     } finally {
-      setNavLoading(false);
+      if (seq === requestSeq.current) setNavLoading(false);
     }
   };
   const sync = async (e?: FormEvent) => {
     e?.preventDefault();
-    await loadFund(code.padStart(6, "0"));
+    if (!/^\d{1,6}$/.test(code.trim())) return setNotice("请输入 6 位基金代码");
+    await loadFund(code.trim().padStart(6, "0"));
   };
   /** A watchlist research link opens with its fund details already loaded. */
   useEffect(() => {
@@ -455,10 +448,40 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadFund]);
+  const cancelCurrent = async () => {
+    const runId = runIdRef.current;
+    if (!runId || cancelSentRef.current) return;
+    cancelSentRef.current = true;
+    try {
+      await api(`/api/v1/agent/runs/${runId}/cancel`, { method: "POST" });
+      setNotice("已停止");
+    } catch {
+      cancelSentRef.current = false;
+      setNotice("停止请求未送达，已保留当前内容，可再试一次");
+    }
+  };
+  const stopGeneration = () => {
+    stopRef.current = true;
+    setMessages((current) => current.map((message) => {
+      if (message.activity?.status !== "running") return message;
+      const steps = message.activity.steps;
+      const already = steps.at(-1)?.text === "已停止";
+      return { ...message, activity: { status: "stopped", steps: already ? steps : [...steps, { text: "已停止" }] } };
+    }));
+    if (runIdRef.current) void cancelCurrent();
+    else setNotice("正在停止…");
+  };
   /** Sends the current fund identity with the question to avoid ambiguous AI research. */
   const ask = async (e: FormEvent) => {
     e.preventDefault();
     if (!q.trim() || agentLoading) return;
+    if (!hasFreshAccess() && !(await restoreSession())) {
+      location.href = `/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`;
+      return;
+    }
+    stopRef.current = false;
+    runIdRef.current = "";
+    cancelSentRef.current = false;
     const text = fund ? `研究对象：${fund.name}（${fund.fundCode}）\n问题：${q}` : q;
     const turnId = crypto.randomUUID();
     setMessages((x) => [
@@ -480,9 +503,6 @@ export default function Home() {
         },
       }));
     try {
-      // Refresh once before protected calls so an expired browser session can recover.
-      if (!hasFreshAccess() && !(await restoreSession()))
-        throw Error("请先登录后再使用 AI 研究助手");
       let id = cid;
       if (!id) {
         // Conversation creation returns JSON; SSE is negotiated only for the chat stream.
@@ -508,8 +528,10 @@ export default function Home() {
       if (!r.body) throw Error("浏览器不支持流式响应");
       const reader = r.body.getReader(),
         decoder = new TextDecoder();
+      readerRef.current = reader;
       let buffer = "",
-        streaming = false;
+        streaming = false,
+        halt = false;
       const label = (name: string) =>
         (
           ({
@@ -527,9 +549,16 @@ export default function Home() {
             search_fund_documents: "知识库检索",
           }) as Record<string, string>
         )[name] ?? name;
-      while (true) {
+      while (!halt) {
+        if (stopRef.current && runIdRef.current) {
+          await cancelCurrent();
+          break;
+        }
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || (stopRef.current && runIdRef.current)) {
+          if (stopRef.current) await cancelCurrent();
+          break;
+        }
         buffer += decoder
           .decode(value, { stream: true })
           .replace(/\r\n/g, "\n");
@@ -544,8 +573,16 @@ export default function Home() {
           if (!raw) continue;
           const event = JSON.parse(raw),
             data = event.data;
-          if (event.type === "run.started")
-            appendStep("Agent 运行已开始");
+          if (event.type === "run.started") {
+            const startedId = String(event.runId ?? data?.runId ?? "");
+            if (startedId) runIdRef.current = startedId;
+            appendStep("研究已开始");
+            if (stopRef.current) {
+              await cancelCurrent();
+              halt = true;
+              break;
+            }
+          }
           else if (event.type === "tool.started")
             appendStep(`正在调用：${label(data.toolName)}`);
           else if (event.type === "tool.completed")
@@ -557,10 +594,12 @@ export default function Home() {
           else if (event.type === "run.failed")
             throw Error(`${data.message}（${data.errorCode}）`);
           else if (event.type === "answer.delta") {
+            if (stopRef.current) continue;
             const chunk = String(data ?? "");
-            updateTurn((message) => ({ ...message, content: streaming ? message.content + chunk : chunk }));
+            updateTurn((message) => ({ ...message, content: acceptDelta(stopRef.current, streaming ? message.content : "", chunk) }));
             streaming = true;
-          } else if (event.type === "answer.completed") {
+          } else if (stopRef.current) continue;
+          else if (event.type === "answer.completed") {
             const answer = data.answer,
               runId = String(event.runId ?? data.runId ?? "");
             updateTurn((message) => ({
@@ -599,18 +638,35 @@ export default function Home() {
           }
         }
       }
+      if (stopRef.current) {
+        updateTurn((message) => {
+          const steps = message.activity?.steps ?? [];
+          const already = steps.at(-1)?.text === "已停止";
+          return { ...message, activity: { status: "stopped", steps: already ? steps : [...steps, { text: "已停止" }] } };
+        });
+        if (!runIdRef.current) setNotice("已停止");
+      }
     } catch (x) {
-      const detail = x instanceof Error ? x.message : "未知错误";
-      updateTurn((message) => ({
-        ...message,
-        content: message.content || `本次请求未完成：${detail}`,
-        activity: {
-          status: "failed",
-          steps: [...(message.activity?.steps ?? []), { text: `执行失败：${detail}`, failed: true }],
-        },
-      }));
-      setNotice(`Agent 请求失败 · ${detail}`);
+      if (stopRef.current) {
+        updateTurn((message) => {
+          const steps = message.activity?.steps ?? [];
+          const already = steps.at(-1)?.text === "已停止";
+          return { ...message, activity: { status: "stopped", steps: already ? steps : [...steps, { text: "已停止" }] } };
+        });
+      } else {
+        const detail = x instanceof Error ? x.message : "未知错误";
+        updateTurn((message) => ({
+          ...message,
+          content: message.content || `本次请求未完成：${detail}`,
+          activity: {
+            status: "failed",
+            steps: [...(message.activity?.steps ?? []), { text: `执行失败：${detail}`, failed: true }],
+          },
+        }));
+        setNotice(`Agent 请求失败 · ${detail}`);
+      }
     } finally {
+      readerRef.current = null;
       setAgentLoading(false);
     }
   };
@@ -801,7 +857,7 @@ export default function Home() {
             onChange={(e) => setQ(e.target.value)}
             placeholder={fund?`问问 ${fund.name} 的表现与风险`:'先查询基金，再开始研究'}
           />
-          <button disabled={agentLoading}>{agentLoading ? "…" : "↑"}</button>
+          {agentLoading ? <button type="button" className="agent-stop" onClick={stopGeneration}>停止</button> : <button type="submit">↑</button>}
         </form>
         <small>
           {fund?`正在研究：${fund.name}（${fund.fundCode}）`:'请先查询一只基金。'} 回答仅供研究参考，数据日期以引用来源为准。
