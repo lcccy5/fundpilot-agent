@@ -26,7 +26,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
-/** Real-model A/B for stateless standalone requests versus the current bounded memory design. */
+/**
+ * 对比无记忆的独立提问和当前有界记忆设计。默认构建不执行。
+ */
 @SpringBootTest(properties = {
         "fund.agent.enabled=true",
         "fund.knowledge.enabled=true",
@@ -43,6 +45,9 @@ class MemoryCurrentDesignAbIT {
     @Autowired ObjectMapper mapper;
     @Autowired MemoryRealModelAbIT.ModelTokenAccumulator tokenAccumulator;
 
+    /**
+     * 对同一组任务分别跑无记忆和当前记忆，并写出对比报告。
+     */
     @Test void comparesNoMemoryWithCurrentQueryAwareMemory() throws Exception {
         List<Observation> baseline=new ArrayList<>();
         List<Observation> memory=new ArrayList<>();
@@ -76,6 +81,9 @@ class MemoryCurrentDesignAbIT {
         assertThat(report.memory().modelCalls()).isGreaterThanOrEqualTo(16);
     }
 
+    /**
+     * 执行一轮提问，统计令牌、重复工具和事实卡是否真正替代了工具。
+     */
     private Observation execute(String arm,TaskGroup group,int turnIndex,String conversationId,String question,
                                 String fixture,Turn turn,Set<String> priorSignatures){
         String requestId="current-memory-ab-"+arm+"-"+group.id()+"-"+turnIndex+"-"+UUID.randomUUID();
@@ -96,8 +104,14 @@ class MemoryCurrentDesignAbIT {
                 tokens,calls,repeated,Set.copyOf(usedCards),effectiveHit,quality);
     }
 
+    /**
+     * 新建一条空对话供本轮使用。
+     */
     private String createConversation(){String id=UUID.randomUUID().toString();repository.createConversation(id,Instant.now());return id;}
 
+    /**
+     * 汇总两侧的令牌、工具次数和质量，并单独比较单轮、链首和追问。
+     */
     private static Report report(String modelName,List<TaskGroup> groups,List<Observation> baseline,List<Observation> memory){
         Metrics a=metrics(baseline),b=metrics(memory);
         Comparison singles=comparison(baseline.stream().filter(item->item.kind()==TaskKind.SINGLE).toList(),memory.stream().filter(item->item.kind()==TaskKind.SINGLE).toList());
@@ -111,10 +125,34 @@ class MemoryCurrentDesignAbIT {
                 "A uses a fresh conversation and a self-contained question for every turn. B uses one conversation per 1-3 turn user task and natural follow-ups with the current two-turn window, conversation note, TTL and query-aware per-fund memory.");
     }
 
+    /**
+     * 计算两组观察之间的令牌变化和工具减少比例。
+     */
     private static Comparison comparison(List<Observation> a,List<Observation> b){Metrics left=metrics(a),right=metrics(b);return new Comparison(left,right,change(left.promptTokens(),right.promptTokens()),change(left.totalTokens(),right.totalTokens()),reduction(left.toolCalls(),right.toolCalls()));}
+    /**
+     * 把一组观察加成模型调用、令牌、工具和质量通过率。
+     */
     private static Metrics metrics(List<Observation> values){long prompt=values.stream().map(Observation::tokens).mapToLong(MemoryRealModelAbIT.TokenTotals::promptTokens).sum();long completion=values.stream().map(Observation::tokens).mapToLong(MemoryRealModelAbIT.TokenTotals::completionTokens).sum();return new Metrics(values.size(),values.stream().map(Observation::tokens).mapToLong(MemoryRealModelAbIT.TokenTotals::modelCalls).sum(),prompt,completion,prompt+completion,values.stream().mapToLong(value->value.calls().size()).sum(),values.stream().mapToLong(Observation::repeatedCalls).sum(),percent(values.stream().filter(Observation::quality).count(),values.size()));}
-    private static double change(long a,long b){return a==0?0:round(100D*(b-a)/a);}private static double reduction(long a,long b){return a==0?0:round(100D*(a-b)/a);}private static double percent(long a,long b){return b==0?0:round(100D*a/b);}private static double round(double value){return Math.round(value*100D)/100D;}
+    /**
+     * 计算从基线到对照的百分比变化。基线为零时记为零。
+     */
+    private static double change(long a,long b){return a==0?0:round(100D*(b-a)/a);}
+    /**
+     * 计算对照相对基线减少的百分比。
+     */
+    private static double reduction(long a,long b){return a==0?0:round(100D*(a-b)/a);}
+    /**
+     * 计算分子占分母的百分比。分母为零时记为零。
+     */
+    private static double percent(long a,long b){return b==0?0:round(100D*a/b);}
+    /**
+     * 保留两位小数，便于报告比较。
+     */
+    private static double round(double value){return Math.round(value*100D)/100D;}
 
+    /**
+     * 提供单轮和多轮追问任务，覆盖资料、指标、净值、行情、文档和对比。
+     */
     private static List<TaskGroup> taskGroups(){return List.of(
             new TaskGroup("single-profile",TaskKind.SINGLE,List.of(new Turn("查询基金000001的名称、类型、基金公司和基金经理，并引用工具证据。","查询基金000001的名称、类型、基金公司和基金经理，并引用工具证据。","get_fund_profile","FUND_PROFILE",false))),
             new TaskGroup("metrics-chain",TaskKind.CHAIN,List.of(
@@ -139,12 +177,36 @@ class MemoryCurrentDesignAbIT {
                     new Turn("比较基金000001和110022在2026年1月1日至2026年8月31日的收益和最大回撤，并引用工具证据。","比较基金000001和110022在2026年1月1日至2026年8月31日的收益和最大回撤，并引用工具证据。","compare_fund_metrics","FUND_COMPARISON",false),
                     new Turn("基金000001和110022在2026年1月1日至2026年8月31日谁的最大回撤更小？请引用工具证据。","这两只基金同期谁的最大回撤更小？请引用已有证据。","compare_fund_metrics","FUND_COMPARISON",true))));}
 
+    /**
+     * 区分一次性问题和需要追问的任务链。
+     */
     enum TaskKind{SINGLE,CHAIN}
+    /**
+     * 一组共享对话的提问。
+     */
     record TaskGroup(String id,TaskKind kind,List<Turn> turns){}
+    /**
+     * 同一问法的独立表述、上下文表述，以及期望的工具和证据。
+     */
     record Turn(String standalone,String contextual,String expectedTool,String expectedEvidence,boolean followUp){}
+    /**
+     * 一次工具调用的名称和参数摘要。
+     */
     record ToolCall(String name,String argumentHash){}
+    /**
+     * 一轮对比的用量、质量和事实卡命中情况。
+     */
     record Observation(String arm,String taskGroup,TaskKind kind,int turnIndex,boolean followUp,String runId,String question,String answer,String error,MemoryRealModelAbIT.TokenTotals tokens,List<ToolCall> calls,int repeatedCalls,Set<String> usedCardIds,boolean effectiveFactHit,boolean quality){}
+    /**
+     * 一组观察的合计用量和质量通过率。
+     */
     record Metrics(int turns,long modelCalls,long promptTokens,long completionTokens,long totalTokens,long toolCalls,long repeatedToolCalls,double qualityPassRatePercent){}
+    /**
+     * 两侧合计以及相对变化。
+     */
     record Comparison(Metrics baseline,Metrics memory,double promptTokenChangePercent,double totalTokenChangePercent,double toolCallReductionPercent){}
+    /**
+     * 当前记忆设计对比实验的完整结果和方法说明。
+     */
     record Report(String datasetVersion,String modelName,int taskGroups,int turnsPerGroup,Metrics baseline,Metrics memory,double promptTokenChangePercent,double totalTokenChangePercent,double toolCallReductionPercent,double effectiveFactHitRatePercent,Comparison singles,Comparison chainInitials,Comparison followUps,String methodology){}
 }

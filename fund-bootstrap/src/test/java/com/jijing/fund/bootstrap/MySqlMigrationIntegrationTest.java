@@ -26,6 +26,9 @@ import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 在专用测试库核对迁移出的表，以及记忆、任务、发件箱和报表的写入。未打开环境变量时不执行。
+ */
 @SpringBootTest
 @ActiveProfiles("test")
 @EnabledIfEnvironmentVariable(named="RUN_MYSQL_INTEGRATION_TESTS", matches="true")
@@ -38,6 +41,10 @@ class MySqlMigrationIntegrationTest {
     @Autowired ChatMemoryRepository chatMemoryRepository;
     @Autowired AgentDagRepository dag;
     @Autowired com.jijing.fund.infrastructure.outbox.JdbcTransactionalOutbox outbox;
+
+    /**
+     * 确认当前库是测试库，且核心业务表已经存在。
+     */
     @Test void migratesOnlyDedicatedTestDatabase() {
         assertTestDatabase();
         Integer fundTable = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='fund'", Integer.class);
@@ -60,8 +67,14 @@ class MySqlMigrationIntegrationTest {
         assertDoesNotThrow(() -> navRepository.findHistory(new FundCode("000001"), LocalDate.of(2026,1,1), LocalDate.of(2026,1,31)));
     }
 
+    /**
+     * 同一文档重复登记时复用已有版本，不另插一行。
+     */
     @Test @Transactional void persistsVersionedKnowledgeDocumentMetadata(){assertTestDatabase();var repository=new JdbcDocumentMetadataRepository(jdbc,new ObjectMapper().findAndRegisterModules());var command=new RegisterDocumentCommand("integration-doc","季度报告",FundDocumentType.QUARTERLY_REPORT,"测试基金","integration",URI.create("https://example.test/q.txt"),LocalDate.of(2026,6,30),Set.of("000001"),"q.txt","text/plain","integration content".getBytes());Instant now=Instant.parse("2026-08-23T08:00:00Z");var first=repository.register(command,"c".repeat(64),"cc/file.txt",now);var duplicate=repository.register(command,"c".repeat(64),"cc/file.txt",now);assertFalse(first.duplicate());assertTrue(duplicate.duplicate());assertEquals(first.versionId(),duplicate.versionId());assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_document_version WHERE version_id=?",Integer.class,first.versionId()));}
 
+    /**
+     * 同一基金类别只保留最新事实卡，并写回对话笔记。
+     */
     @Test @Transactional void keepsOneCurrentMemoryFilePerFundCategoryAndPersistsConversationNote(){
         assertTestDatabase();String conversationId=UUID.randomUUID().toString();Instant now=Instant.parse("2026-09-10T08:00:00Z");
         agentRuntimeRepository.createConversation(conversationId,now);
@@ -78,6 +91,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals(state,agentRuntimeRepository.findConversationState(conversationId));
     }
 
+    /**
+     * 对话消息、运行和工具调用可以一起落库。
+     */
     @Test
     @Transactional
     void persistsConversationMemoryRunAndToolAudit() {
@@ -92,6 +108,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM agent_tool_call WHERE run_id=?",Integer.class,runId));
     }
 
+    /**
+     * 成功的迁移历史必须连续包含 V1 到 V23。
+     */
     @Test
     void flywayHistoryContainsV1ThroughV23() {
         assertTestDatabase();
@@ -99,6 +118,9 @@ class MySqlMigrationIntegrationTest {
         for(int v=1;v<=23;v++)assertTrue(versions.contains(Integer.toString(v)),"missing Flyway V"+v);
     }
 
+    /**
+     * 同一指标快照重复写入只保留一行。
+     */
     @Test
     @Transactional
     void metricSnapshotUpsertIsIdempotent() {
@@ -122,6 +144,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals(1, count);
     }
 
+    /**
+     * 任务事件按序回放，其他用户不能读取这次运行。
+     */
     @Test
     @Transactional
     void jdbcDagIsolatesOwnersAndReplaysEvents() {
@@ -141,6 +166,9 @@ class MySqlMigrationIntegrationTest {
         assertThrows(com.jijing.fund.agent.exception.AgentRunNotFoundException.class,()->coordinator.get(run.runId(),"00000000-0000-0000-0000-000000000002"));
     }
 
+    /**
+     * 发件箱事件可以被领取，同一消费键不能成功两次。
+     */
     @Test
     @Transactional
     void outboxAppendAndDuplicateConsume() {
@@ -152,6 +180,9 @@ class MySqlMigrationIntegrationTest {
         assertFalse(outbox.consumeIdempotent("monitor",event.eventId(),java.time.Instant.parse("2026-08-27T08:00:03Z")));
     }
 
+    /**
+     * 两个工作者并发领取时不会拿到同一个任务。
+     */
     @Test
     void twoWorkersClaimDistinctTasksWithoutDuplicate() throws Exception {
         assertTestDatabase();
@@ -172,6 +203,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals("SUCCEEDED",coordinator.get(run.runId(),owner).status());
     }
 
+    /**
+     * 租约过期后任务可以恢复，已经成功的任务不会再执行一次。
+     */
     @Test
     void workerDeathRecoversLeaseWithoutRepeatingSucceededTasks() {
         assertTestDatabase();
@@ -190,6 +224,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals(total,succeeded);
     }
 
+    /**
+     * 发布者崩溃后，过期租约可以被另一个发布者重新领取。
+     */
     @Test
     @Transactional
     void outboxPublishingLeaseCanBeReclaimedAfterCrash() {
@@ -202,6 +239,9 @@ class MySqlMigrationIntegrationTest {
         assertTrue(outbox.claimPending("survivor-publisher",java.time.Instant.parse("2026-08-27T08:00:10Z")).isPresent());
     }
 
+    /**
+     * 无法识别的事件模式进入死信，原事件标记为死信。
+     */
     @Test
     @Transactional
     void unknownOutboxSchemaGoesToDeadLetter() {
@@ -214,6 +254,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals("DEAD_LETTER",jdbc.queryForObject("SELECT status FROM outbox_event WHERE event_id=?",String.class,claimed.eventId()));
     }
 
+    /**
+     * 月报版本只对属主可见，MCP 调用审计会留下记录。
+     */
     @Test
     @Transactional
     void reportJobAndMcpAuditAreOwnerScoped() {
@@ -233,6 +276,9 @@ class MySqlMigrationIntegrationTest {
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM mcp_call_audit WHERE capability_name='FUND_PROFILE_QUERY'",Integer.class));
     }
 
+    /**
+     * 独立进程被结束后，过期租约释放且成功任务不重复执行。
+     */
     @Test
     void killingSeparateJvmReleasesLeaseWithoutRepeatingSuccess() throws Exception {
         assertTestDatabase();
@@ -259,6 +305,9 @@ class MySqlMigrationIntegrationTest {
         assertTrue(dag.alreadySucceeded(com.jijing.fund.agent.execution.PlanTaskWorker.executionKey(claimed)));
     }
 
+    /**
+     * 在起跑信号之后反复领取任务，并拒绝重复的任务标识。
+     */
     private int claimLoop(com.jijing.fund.agent.execution.PlanTaskWorker worker,java.util.Set<String> claimed,java.util.concurrent.CountDownLatch start,String workerId){
         try{start.await(2,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();return 0;}
         int n=0;for(int i=0;i<20;i++){
@@ -270,6 +319,9 @@ class MySqlMigrationIntegrationTest {
         return n;
     }
 
+    /**
+     * 插入运行属主账号，满足外键。
+     */
     private void insertUser(String userId){
         jdbc.update("""
                 INSERT INTO user_account(user_id,normalized_username,display_name,password_hash,status,token_version,version,created_at,updated_at)
@@ -278,6 +330,9 @@ class MySqlMigrationIntegrationTest {
                 java.sql.Timestamp.from(java.time.Instant.parse("2026-08-27T08:00:00Z")),java.sql.Timestamp.from(java.time.Instant.parse("2026-08-27T08:00:00Z")));
     }
 
+    /**
+     * 拒绝在非专用测试库上继续，避免误写开发数据。
+     */
     private void assertTestDatabase() {
         String database = jdbc.queryForObject("SELECT DATABASE()", String.class);
         assertEquals("jijing_agent_test", database, "Integration tests must never use the development database");

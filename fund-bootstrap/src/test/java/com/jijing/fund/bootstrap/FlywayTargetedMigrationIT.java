@@ -9,8 +9,14 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+/**
+ * 在临时库上按版本段执行迁移，确认每段才出现对应的表。未打开环境变量时不执行。
+ */
 @EnabledIfEnvironmentVariable(named="RUN_MYSQL_INTEGRATION_TESTS", matches="true")
 class FlywayTargetedMigrationIT {
+    /**
+     * V8 之前没有账号表，V14 有组合，V18 有计划，V23 有发件箱和报表。
+     */
     @Test void migratesV1ToV8ThenV9ToV14ThenV15ToV18ThenV19ToV23() throws Exception {
         String admin=envUrl().replace("/jijing_agent_test","/");
         String user=System.getenv().getOrDefault("MYSQL_USERNAME","root");
@@ -44,10 +50,16 @@ class FlywayTargetedMigrationIT {
         }
     }
 
+    /**
+     * 把临时库迁移到指定的 Flyway 目标版本。
+     */
     private static void migrate(String url,String user,String password,String target){
         Flyway.configure().dataSource(url,user,password).locations("classpath:db/migration").target(target).load().migrate();
     }
 
+    /**
+     * 读取当前库的全部表名，并转成小写便于比较。
+     */
     private static Set<String> tables(String url,String user,String password) throws Exception {
         try(Connection c=DriverManager.getConnection(url,user,password); var ps=c.prepareStatement("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()"); ResultSet rs=ps.executeQuery()){
             Set<String> names=new java.util.HashSet<>();
@@ -56,6 +68,9 @@ class FlywayTargetedMigrationIT {
         }
     }
 
+    /**
+     * 使用环境变量中的测试库地址，缺省指向本机专用端口。
+     */
     private static String envUrl(){
         return System.getenv().getOrDefault("MYSQL_TEST_URL","jdbc:mysql://127.0.0.1:3307/jijing_agent_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai");
     }

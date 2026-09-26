@@ -14,6 +14,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+/**
+ * 用真实过滤链核对两个用户的组合、自选和运行隔离，以及重复导入不会多写交易。未打开环境变量时不执行。
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -23,6 +26,9 @@ class V3UserPortfolioMysqlIT {
     @Autowired MockMvc mvc;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
+    /**
+     * 用户 B 不能读取用户 A 的组合、自选和运行；同一账单提交两次只保留一笔交易。
+     */
     @Test void twoUsersAreIsolatedAndImportIsIdempotent() throws Exception {
         org.junit.jupiter.api.Assertions.assertEquals("jijing_agent_test",jdbc.queryForObject("SELECT DATABASE()",String.class));
         String suffix=Long.toString(System.nanoTime()%1_000_000_000L);
@@ -54,14 +60,23 @@ class V3UserPortfolioMysqlIT {
                 .andExpect(status().isNotFound());
     }
 
+    /**
+     * 注册并取出访问令牌。
+     */
     private String register(String username,String password)throws Exception{
         return com.jayway.jsonpath.JsonPath.read(registerRaw(username,password).getResponse().getContentAsString(),"$.data.accessToken");
     }
+    /**
+     * 提交注册请求，保留刷新 Cookie 供后续轮换。
+     */
     private MvcResult registerRaw(String username,String password)throws Exception{
         return mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\""+username+"\",\"displayName\":\""+username+"\",\"password\":\""+password+"\"}"))
                 .andExpect(status().isCreated()).andReturn();
     }
+    /**
+     * 为指定令牌创建一个组合并返回标识。
+     */
     private String createPortfolio(String token,String name)throws Exception{
         MvcResult result=mvc.perform(post("/api/v1/portfolios").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\""+name+"\"}"))
                 .andExpect(status().isOk()).andReturn();
@@ -69,15 +84,24 @@ class V3UserPortfolioMysqlIT {
         if(id instanceof java.util.Map<?,?> map)return String.valueOf(map.get("value"));
         return String.valueOf(id);
     }
+    /**
+     * 上传 CSV 预览，返回导入批次标识。
+     */
     private String preview(String token,String portfolioId,byte[] csv)throws Exception{
         MvcResult result=mvc.perform(multipart("/api/v1/portfolios/"+portfolioId+"/imports/preview").file(new MockMultipartFile("file","sample.csv","text/csv",csv)).header("Authorization","Bearer "+token))
                 .andExpect(status().isOk()).andReturn();
         return com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(),"$.data.batchId");
     }
+    /**
+     * 提交已经预览过的导入批次。
+     */
     private void commit(String token,String portfolioId,String batchId)throws Exception{
         mvc.perform(post("/api/v1/portfolios/"+portfolioId+"/imports/"+batchId+"/commit").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isOk());
     }
+    /**
+     * 替该用户提交一次月报目标运行并返回运行标识。
+     */
     private String submitRun(String token)throws Exception{
         MvcResult result=mvc.perform(post("/api/v1/agent/runs").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"message\":\""+PLAN_GOAL+"\"}")).andExpect(status().isOk()).andReturn();
