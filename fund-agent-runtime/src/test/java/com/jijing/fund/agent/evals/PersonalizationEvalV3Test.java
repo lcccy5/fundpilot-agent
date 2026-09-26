@@ -3,8 +3,10 @@ package com.jijing.fund.agent.evals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jijing.fund.agent.exception.AgentPolicyViolationException;
 import com.jijing.fund.agent.orchestration.FundAgentSafetyPolicy;
 import com.jijing.fund.agent.planning.PlanDraft;
 import com.jijing.fund.agent.planning.PlanTaskDraft;
@@ -21,53 +23,118 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
 
+/**
+ * 用固定数据集检查个性化路由、所有权注入和适当性回答是否被拒绝。
+ * 数据集缺失时读取会失败；某一行字段缺失时该行断言失败，不跳过。
+ */
 class PersonalizationEvalV3Test {
-    private final ObjectMapper mapper=new ObjectMapper();
-    private final FundAgentSafetyPolicy policy=new FundAgentSafetyPolicy();
-    private final PlanValidator validator=new PlanValidator();
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final FundAgentSafetyPolicy policy = new FundAgentSafetyPolicy();
+    private final PlanValidator validator = new PlanValidator();
 
-    @Test void personalizationRoutingLoadsPersonalToolsOnlyForMineIntents()throws Exception{
-        var personal=mock(PersonalFundTool.class);
-        var router=new FundToolRouter(mock(FundProfileTool.class),mock(FundNavTool.class),mock(FundMetricsTool.class),mock(FundComparisonTool.class),mock(FundDocumentSearchTool.class),null,null,null,personal);
-        for(JsonNode row:load("evals/personalization-routing-v3.jsonl")){
-            boolean hasPersonal=java.util.Arrays.asList(router.toolsFor(row.get("question").asText())).contains(personal);
+    /**
+     * 确认只有“我的”类意图才会装上个人工具。
+     * 数据集打不开或期望字段缺失时失败。
+     */
+    @Test
+    void personalizationRoutingLoadsPersonalToolsOnlyForMineIntents() throws Exception {
+        var personal = mock(PersonalFundTool.class);
+        var router = new FundToolRouter(
+                mock(FundProfileTool.class),
+                mock(FundNavTool.class),
+                mock(FundMetricsTool.class),
+                mock(FundComparisonTool.class),
+                mock(FundDocumentSearchTool.class),
+                null,
+                null,
+                null,
+                personal);
+        for (JsonNode row : load("evals/personalization-routing-v3.jsonl")) {
+            boolean hasPersonal = Arrays.asList(router.toolsFor(row.get("question").asText())).contains(personal);
             assertThat(hasPersonal).as(row.get("id").asText()).isEqualTo(row.get("expectPersonal").asBoolean());
         }
     }
 
-    @Test void ownershipAndTradeInjectionAreDenied()throws Exception{
-        for(JsonNode row:load("evals/ownership-safety-v3.jsonl")){
-            String deny=row.get("deny").asText();
-            if("input".equals(deny))assertThatThrownBy(()->policy.validateInput(row.get("question").asText())).as(row.get("id").asText()).isInstanceOf(com.jijing.fund.agent.exception.AgentPolicyViolationException.class);
-            if("plan".equals(deny)){
-                var leak=new PlanDraft("g",Map.of(),Map.of(),List.of(new PlanTaskDraft("a","PORTFOLIO_SNAPSHOT",Map.of("userId",row.get("taskUserId").asText()),List.of(),List.of("PORTFOLIO"))));
-                assertThatThrownBy(()->validator.validate(leak,row.get("owner").asText())).isInstanceOf(PlanValidationException.class);
+    /**
+     * 确认输入侧和计划侧的所有权、交易注入都会被拒绝。
+     * 未知的拒绝类型不会断言，因此漏写类型时本测试仍可能通过。
+     */
+    @Test
+    void ownershipAndTradeInjectionAreDenied() throws Exception {
+        for (JsonNode row : load("evals/ownership-safety-v3.jsonl")) {
+            String deny = row.get("deny").asText();
+            if ("input".equals(deny)) {
+                assertThatThrownBy(() -> policy.validateInput(row.get("question").asText()))
+                        .as(row.get("id").asText())
+                        .isInstanceOf(AgentPolicyViolationException.class);
+            }
+            if ("plan".equals(deny)) {
+                var leak = new PlanDraft(
+                        "g",
+                        Map.of(),
+                        Map.of(),
+                        List.of(new PlanTaskDraft(
+                                "a",
+                                "PORTFOLIO_SNAPSHOT",
+                                Map.of("userId", row.get("taskUserId").asText()),
+                                List.of(),
+                                List.of("PORTFOLIO"))));
+                assertThatThrownBy(() -> validator.validate(leak, row.get("owner").asText()))
+                        .isInstanceOf(PlanValidationException.class);
             }
         }
     }
 
-    @Test void suitabilityAnswersRejectGuaranteeAndAllIn()throws Exception{
-        for(JsonNode row:load("evals/suitability-safety-v3.jsonl")){
-            if("output".equals(row.get("deny").asText()))assertThatThrownBy(()->policy.validateAnswer(row.get("answer").asText())).as(row.get("id").asText()).isInstanceOf(com.jijing.fund.agent.exception.AgentPolicyViolationException.class);
-            else policy.validateAnswer(row.get("answer").asText());
+    /**
+     * 确认保证收益和全仓建议会被适当性策略拒绝，其余样本应能通过。
+     * 输出校验抛出其他异常时测试失败。
+     */
+    @Test
+    void suitabilityAnswersRejectGuaranteeAndAllIn() throws Exception {
+        for (JsonNode row : load("evals/suitability-safety-v3.jsonl")) {
+            if ("output".equals(row.get("deny").asText())) {
+                assertThatThrownBy(() -> policy.validateAnswer(row.get("answer").asText()))
+                        .as(row.get("id").asText())
+                        .isInstanceOf(AgentPolicyViolationException.class);
+            } else {
+                policy.validateAnswer(row.get("answer").asText());
+            }
         }
     }
 
-    @Test void portfolioEvidenceDatasetDocumentsUnavailableAndCoverageContracts()throws Exception{
-        var rows=load("evals/portfolio-evidence-v3.jsonl");
+    /**
+     * 确认组合证据数据集覆盖不可用、重建和覆盖率三类契约。
+     * 行数不是 3 或缺少约定取值时失败。
+     */
+    @Test
+    void portfolioEvidenceDatasetDocumentsUnavailableAndCoverageContracts() throws Exception {
+        var rows = load("evals/portfolio-evidence-v3.jsonl");
         assertThat(rows).hasSize(3);
-        assertThat(rows.stream().map(n->n.get("expect").asText()).toList()).contains("UNAVAILABLE","rebuild","coverage");
+        assertThat(rows.stream().map(n -> n.get("expect").asText()).toList())
+                .contains("UNAVAILABLE", "rebuild", "coverage");
     }
 
-    private List<JsonNode> load(String resource)throws Exception{
-        List<JsonNode> rows=new ArrayList<>();
-        try(var stream=getClass().getClassLoader().getResourceAsStream(resource);var reader=new BufferedReader(new InputStreamReader(Objects.requireNonNull(stream),StandardCharsets.UTF_8))){
-            String line;while((line=reader.readLine())!=null)if(!line.isBlank())rows.add(mapper.readTree(line));
+    /**
+     * 按行读取类路径上的 JSONL 数据集。
+     * 资源不存在时失败；空行会被跳过，非法 JSON 会中断读取。
+     */
+    private List<JsonNode> load(String resource) throws Exception {
+        List<JsonNode> rows = new ArrayList<>();
+        try (var stream = getClass().getClassLoader().getResourceAsStream(resource);
+                var reader = new BufferedReader(
+                        new InputStreamReader(Objects.requireNonNull(stream), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isBlank()) {
+                    rows.add(mapper.readTree(line));
+                }
+            }
         }
         return rows;
     }

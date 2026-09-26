@@ -1,9 +1,15 @@
 package com.jijing.fund.agent.exception;
 
-/** 表示 Agent 运行时发生 AgentPolicyViolationException 所描述的失败情形。 */
+/**
+ * 输入、输出或执行权限违反安全策略时抛出，调用方应中止本轮。
+ * 不携带结构化违规码，只有说明文本。
+ */
 public class AgentPolicyViolationException extends RuntimeException {
-    
-    /** 执行该 Agent 运行时组件中的 AgentPolicyViolationException 操作。 */
+
+    /**
+     * 用策略说明构造违规异常。
+     * 说明为空时仍抛出，调用方无法从消息区分具体规则。
+     */
     public AgentPolicyViolationException(String message) {
         super(message);
     }

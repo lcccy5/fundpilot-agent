@@ -1,6 +1,21 @@
 package com.jijing.fund.agent.multiagent;
 
-/** 定义 Agent 运行时使用的 AgentRole 可选值。 */
+/**
+ * 计划执行中可分派的对等角色。
+ * 监督者只负责分派，不能直接执行工具。角色与任务类型不匹配时分派失败，计划不会带着越权绑定继续。
+ * 路由未进入计划执行或审批被拒时，这些角色都不会启动。
+ */
 public enum AgentRole {
-    SUPERVISOR,DATA_RESEARCHER,PORTFOLIO_ANALYST,RISK_ANALYST,VERIFIER,WRITER
+    /** 只做分派。尝试让它执行任何能力都会被访问控制拒绝。 */
+    SUPERVISOR,
+    /** 处理公开研究数据，不能读取组合、自选或用户范围声明。 */
+    DATA_RESEARCHER,
+    /** 处理组合与自选。数据研究员无权执行的个人数据任务会改派到此角色。 */
+    PORTFOLIO_ANALYST,
+    /** 处理风险与指标对比。类型名不含可识别风险标记时不会分到此角色。 */
+    RISK_ANALYST,
+    /** 只做报告核验。核验失败由产物契约和核验策略处理，不在角色枚举内重试。 */
+    VERIFIER,
+    /** 只撰写或导出报告，不能产出研究事实。导出仍受审批约束。 */
+    WRITER
 }

@@ -1,0 +1,57 @@
+# fund-interface 与 fund-bootstrap 可读性审计
+
+范围只包括这两个模块的主代码、测试，以及本文档。其它模块没有改动。
+
+## 已整理的控制器
+
+原先挤在一行里的控制器方法已按语句拆开，路径、方法名、参数名和状态码保持不变。包括认证、当前用户、风险画像、自选、组合、Agent 对话与运行、知识库管理、本地评测，以及统一异常处理里的映射方法。
+
+每个类、接口、记录、枚举，以及源码里写出的方法和构造器都补了中文 JavaDoc。控制器说明了路由职责，以及未认证、参数错误、不存在、冲突和下游失败时的状态。
+
+## 新增的失败路径测试
+
+新测试类均以 `ReadabilityGapTest` 结尾，避免和已有测试类抢同一份源文件。
+
+- 认证：空白用户名、过短密码、损坏 JSON、注册时的未分类异常、登录失败、缺少刷新 Cookie、匿名登出。
+- 当前用户：匿名读取和停用、账号不存在、停用时的存储失败。
+- 基金资料、净值、指标、对比、local 同步：缺参、非法日期、不存在、口径不支持、净值未就绪、无重叠区间、同步冲突、上游 502/503。只读基金接口允许匿名，因此不断言 401。
+- 组合、自选、风险画像：匿名、非法字段、版本缺失、冲突、不存在、估值上游失败。问卷控制器本身不解析登录用户。
+- Agent：匿名、空消息、关闭、模型不可用、参数、额度、策略、证据、计划非法、运行不存在、报告未就绪、非法事件游标、审批失败。暂停在没有安全过滤器时仍是 410。
+- 知识库：空文件、错误类型、非法来源地址、缺标题、文档/版本/任务不存在、重试冲突、检索参数和运行时失败、索引治理或授权下载器缺失、导入失败。
+- 月报、通知、MCP：匿名、对账失败、模型不可用、空角色 403、服务器失败。
+- 评测入口：损坏 JSON、空问题仍进入编排、模型不可用。令牌校验不在控制器。
+- 运行摘要：匿名、运行不存在、数据库失败、AgentOps 不可达时降级为 `available=false`。
+- 安全过滤链：受保护路由的入口点 401、无效 Bearer、匿名登出仍是统一信封、未知用户登录、过短密码、缺少刷新 Cookie、匿名暂停到不了 410、普通用户访问内部接口 403、分析师放行、评测令牌缺失或正确。
+- 基金代码 JSON 拒绝非六位和 null。请求号过滤器替换空白和超长取值。
+
+## 仍存在的可读性和行为问题
+
+这些问题没有改生产代码。测试锁定的是当前行为。
+
+1. 受保护路由未认证时，安全入口直接写 `{"error":"UNAUTHORIZED"}`，不是 `ApiResponse`。评测令牌失败同样直接写 `{"error":"EVAL_TOKEN_INVALID"}`。只有请求已经进入控制器时，才使用统一信封。
+2. `BearerFilter` 吞掉一切令牌异常后继续过滤链。无效令牌和没带令牌最后都变成未认证，调用方看不到令牌失效原因。
+3. `AccessDeniedException` 映射为 401 `AUTH_REQUIRED`，不是 403。MCP 非管理员是控制器里的 403 `ADMIN_REQUIRED`。安全配置里角色不足则是框架默认 403，正文也不是统一信封。
+4. 损坏的 JSON（`HttpMessageNotReadableException`）被 `Exception` 兜底收成 500 `INTERNAL_ERROR`，消息固定为 `Internal server error`。方法不被支持也一样。`NoResourceFoundException` 会返回 404，但 `NoHandlerFoundException` 不在单独的映射里，独立 MockMvc 上没有控制器的路径会变成 500。完整 Boot 进程里未匹配路径通常走前一种。
+5. 报告尚未写完时抛出 `IllegalStateException`，对外是 500，不是 409 或 422。组合标识不是 UUID 时，`PortfolioId` 抛出 `IllegalArgumentException`，同样落到 500，而不是 400。
+6. `Last-Event-ID` 不是数字时从 0 重放，不返回 400。
+7. 暂停和恢复的控制器不检查登录用户。请求若到达控制器，无论运行是否存在都返回 410。生产过滤链会先以入口点 401 拦住匿名请求。
+8. 风险问卷控制器不读取当前用户。匿名拒绝只发生在安全过滤链。切片测试里没有过滤器时，匿名请求会执行用例。
+9. `GET /api/v1/funds/**` 允许匿名，控制器没有未认证失败分支。
+10. 本地评测请求没有 Bean 校验。问题或夹具为空仍会调用编排；`null` 会拼进提示词。令牌校验失败的响应不走统一异常处理。
+11. 知识库检索和授权导入里，`KnowledgeInvalidArgumentException` 不是 `IllegalArgumentException` 的子类，若从用例以运行时异常抛出，会被包成 503，而不是 400。上传路径单独重抛了该异常，所以仍是 400。
+12. 上传的内容类型必须与 `application/pdf`、`text/html`、`text/plain` 完全一致，带字符集参数会被拒绝。超过 50MB 和空文件共用同一个判断，测试只覆盖了空文件。`getBytes` 抛出的 IO 异常没有单独夹具。
+13. 运行摘要在 AgentOps 不可达时仍返回 200，只把 `agentOps.available` 设为 false，并带上 `UNAVAILABLE`。调用方不能只看 HTTP 状态。
+14. 索引激活和回滚与创建重建共用 `governance()`。治理组件缺失时都是 503。测试覆盖了创建和查询，没有再为激活、回滚各写一条相同失败。
+15. 组合和自选的部分形参仍叫 `r`、`b`。查询参数名已经写在注解里，改形参名不会改变 HTTP，但这次没有顺手改名。
+16. `WebCorsConfiguration` 的来源配置仍是一行超长注解。集成测试和部分冒烟测试的方法体仍有多条语句挤在一行。若干测试文件仍使用通配符导入。
+17. 评测执行方法虽然已换行，但仍在一个方法里完成建会话、计时、编排和 JDBC 映射。
+
+## 测试
+
+先执行 `mvn -N install`，再执行 `mvn -pl fund-domain,fund-analytics,fund-application,fund-knowledge,fund-infrastructure,fund-agent-runtime,fund-scheduler,fund-test-support -DskipTests install`，最后执行：
+
+`mvn -pl fund-interface,fund-bootstrap test`
+
+本地仓库里原来没有父 POM 和兄弟模块，所以第一条命令不能直接解析依赖。安装之后该命令通过。
+
+结果：`fund-interface` 105 个测试通过；`fund-bootstrap` 31 个测试里 15 个通过、16 个跳过。跳过的是需要 `RUN_MYSQL_INTEGRATION_TESTS`、`RUN_REAL_MODEL_SMOKE_TEST`、`RUN_REAL_EMBEDDING_TEST`、`RUN_MEMORY_WINDOW_EVAL`、`RUN_CURRENT_MEMORY_AB_EVAL` 或 `RUN_MEMORY_AB_EVAL` 的集成测试，本次环境没有这些变量。

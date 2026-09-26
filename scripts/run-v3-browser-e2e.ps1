@@ -1,3 +1,6 @@
+# 拉起测试库、后端 18080 和前端 3100，再跑 fund-web 的浏览器验收。
+# npm install、打包、后端或前端没在时限内就绪、浏览器脚本非 0 时抛错。无论成败都会停掉本次拉起的后端和前端进程。
+# 健康检查或注册页在时限内一直非 200 时视为未就绪，不把半启动的服务留在后台。
 $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Force -Path 'target/v3-acceptance' | Out-Null
 & "$PSScriptRoot\start-mysql-it.ps1"

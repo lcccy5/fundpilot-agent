@@ -6,7 +6,9 @@ import java.net.URI;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
+/** 验证研究数据的来源约束：行情不能冒充官方净值，来源地址不能携带密钥。 */
 class ResearchProvenanceTest {
+    /** 数据含义标为官方净值的来源不能用于构造场内行情，构造时抛出 IllegalArgumentException。 */
     @Test
     void exchangeQuoteCannotPretendToBeOfficialFundNav() {
         var provenance = new DataProvenance(new ProviderId("tencent-quote"), URI.create("https://qt.gtimg.cn/q"),
@@ -18,6 +20,7 @@ class ResearchProvenanceTest {
                 .hasMessageContaining("EXCHANGE_TRADED_QUOTE");
     }
 
+    /** 带查询参数（可能含 apiKey）的来源地址被拒绝，防止密钥进入审计记录。 */
     @Test
     void provenanceRejectsSecretBearingSourceUri() {
         assertThatThrownBy(() -> new DataProvenance(new ProviderId("tencent-quote"),

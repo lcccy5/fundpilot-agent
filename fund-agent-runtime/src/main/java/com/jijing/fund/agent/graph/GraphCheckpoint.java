@@ -3,11 +3,17 @@ package com.jijing.fund.agent.graph;
 import java.time.Instant;
 import java.util.Map;
 
-/** Immutable recovery point emitted after a LangGraph4j node has produced serializable state. */
+/**
+ * LangGraph4j 节点产出可序列化状态后的不可变恢复点。序号和检查点标识一起决定能否安全恢复。
+ * 身份字段缺失时拒绝创建，避免写出无法定位的快照。
+ */
 public record GraphCheckpoint(String checkpointId, String runId, String taskId, String graphName, String graphVersion,
                               long sequence, String nodeName, String phase, Map<String, Object> state,
                               Instant createdAt) {
-    /** Validates the durable identity and freezes the graph state used for resume. */
+    /**
+     * 校验恢复所需的身份、图版本、节点和创建时间，并冻结状态映射。
+     * 任一必填字段为空白或 createdAt 为 null 时抛出 IllegalArgumentException。state 为 null 时收成空映射，不视为失败。
+     */
     public GraphCheckpoint {
         if (checkpointId == null || checkpointId.isBlank() || runId == null || runId.isBlank() || taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("checkpointId, runId and taskId are required");

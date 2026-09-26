@@ -37,7 +37,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
-/** Real-model A/C evaluation: stateless standalone questions versus the complete memory design. */
+/**
+ * 对比无状态独立提问和完整记忆设计。默认构建不执行。
+ */
 @SpringBootTest(properties = {
         "fund.agent.enabled=true",
         "fund.knowledge.enabled=true",
@@ -54,6 +56,9 @@ class MemoryRealModelAbIT {
     @Autowired ObjectMapper mapper;
     @Autowired ModelTokenAccumulator tokenAccumulator;
 
+    /**
+     * 按场景重复同一组追问，写出令牌和重复工具的变化。
+     */
     @Test
     void comparesStatelessAndCompleteMemoryWithTheConfiguredRealModel() throws Exception {
         int scenarioCount = Integer.getInteger("memory.eval.scenarios", 2);
@@ -93,6 +98,9 @@ class MemoryRealModelAbIT {
         assertThat(report.memory().observedModelCalls()).isGreaterThanOrEqualTo(report.turnsPerGroup());
     }
 
+    /**
+     * 执行一轮并判断事实卡是否在不再调用工具的情况下保住了答案质量。
+     */
     private RunObservation execute(String group, int scenario, int turnIndex, String conversationId,
                                    String question, String fixture, Turn turn, Set<String> priorSignatures) {
         String requestId = "memory-real-ab-" + group + "-" + scenario + "-" + turnIndex + "-" + UUID.randomUUID();
@@ -133,12 +141,18 @@ class MemoryRealModelAbIT {
                 tokens, calls, repeatedCalls, usedFactTools, turn.reuseOpportunity(), effectiveFactHit, qualityPass);
     }
 
+    /**
+     * 新建一条空对话。
+     */
     private String createConversation() {
         String id = UUID.randomUUID().toString();
         repository.createConversation(id, Instant.now());
         return id;
     }
 
+    /**
+     * 给出资料、指标和净值的独立问法与依赖上文的问法。
+     */
     private static List<Turn> turns() {
         return List.of(
                 new Turn("查询基金 %s 的基本资料并引用工具证据。", "查询基金 %s 的基本资料并引用工具证据。",
@@ -166,6 +180,9 @@ class MemoryRealModelAbIT {
                         "get_fund_profile", "FUND_PROFILE", true));
     }
 
+    /**
+     * 汇总两侧用量，并按场景列出令牌变化。
+     */
     private static Report report(int scenarios, int turnsPerScenario,
                                  List<RunObservation> baseline, List<RunObservation> memory) {
         GroupMetrics a = metrics(baseline);
@@ -192,6 +209,9 @@ class MemoryRealModelAbIT {
                 "A uses a fresh conversation and standalone question per turn; C uses one conversation and contextual questions with production chat/fact memory");
     }
 
+    /**
+     * 把观察加成模型调用、令牌、工具次数和质量通过率。
+     */
     private static GroupMetrics metrics(List<RunObservation> observations) {
         long prompt = observations.stream().map(RunObservation::tokens).mapToLong(TokenTotals::promptTokens).sum();
         long completion = observations.stream().map(RunObservation::tokens).mapToLong(TokenTotals::completionTokens).sum();
@@ -203,44 +223,83 @@ class MemoryRealModelAbIT {
                 toolCalls, repeated, percent(passed, observations.size()));
     }
 
+    /**
+     * 计算从基线到记忆方案的百分比变化。
+     */
     private static double change(long baseline, long memory) {
         return baseline == 0 ? 0 : round(100.0 * (memory - baseline) / baseline);
     }
 
+    /**
+     * 计算记忆方案相对基线减少的百分比。
+     */
     private static double reduction(long baseline, long memory) {
         return baseline == 0 ? 0 : round(100.0 * (baseline - memory) / baseline);
     }
 
+    /**
+     * 计算百分比。分母为零时记为零。
+     */
     private static double percent(long numerator, long denominator) {
         return denominator == 0 ? 0 : round(100.0 * numerator / denominator);
     }
 
+    /**
+     * 保留两位小数。
+     */
     private static double round(double value) { return Math.round(value * 100.0) / 100.0; }
 
+    /**
+     * 独立问法、上下文问法，以及期望工具和是否存在复用机会。
+     */
     record Turn(String standaloneQuestion, String contextualQuestion, String expectedTool,
                 String expectedEvidenceType, boolean reuseOpportunity) {}
+    /**
+     * 一次工具调用的名称和参数摘要。
+     */
     record ToolCall(String name, String argumentHash) {}
+    /**
+     * 一轮真实模型调用的用量、质量和事实复用结果。
+     */
     record RunObservation(String group, int scenario, int turnIndex, String runId, String question, String answer, String error,
                           TokenTotals tokens, List<ToolCall> toolCalls, int repeatedToolCalls, Set<String> usedFactTools,
                           boolean reuseOpportunity, boolean effectiveFactHit, boolean qualityPass) {}
+    /**
+     * 一组运行的合计用量和质量通过率。
+     */
     record GroupMetrics(int turns, long observedModelCalls, long promptTokens, long completionTokens, long totalTokens,
                         long toolCalls, long repeatedToolCalls, double qualityPassRatePercent) {}
+    /**
+     * 单个场景两侧的用量差。
+     */
     record ScenarioComparison(int scenario, GroupMetrics baseline, GroupMetrics memory,
                               double promptTokenChangePercent, double totalTokenChangePercent,
                               double repeatedToolCallReductionPercent) {}
+    /**
+     * 完整记忆对比实验的结果和方法说明。
+     */
     record Report(String datasetVersion, int scenarios, int turnsPerScenario, int turnsPerGroup, int comparableTurns,
                   GroupMetrics baseline, GroupMetrics memory, double promptTokenChangePercent,
                   double totalTokenChangePercent, double factCardEffectiveHitRatePercent,
                   double repeatedToolCallReductionPercent, List<ScenarioComparison> scenarioComparisons,
                   String methodology) {}
 
+    /**
+     * 从聊天模型观测里按运行汇总提示词和补全令牌。
+     */
     static final class ModelTokenAccumulator implements ObservationHandler<ChatModelObservationContext> {
         private final Map<String, MutableTotals> totals = new ConcurrentHashMap<>();
 
+        /**
+         * 只接收聊天模型观测，忽略其它观测上下文。
+         */
         @Override public boolean supportsContext(Observation.Context context) {
             return context instanceof ChatModelObservationContext;
         }
 
+        /**
+         * 在一次模型调用结束时把用量加到对应运行上。缺少运行号或用量时跳过。
+         */
         @Override public void onStop(ChatModelObservationContext context) {
             String runId = runId(context.getRequest());
             ChatResponse response = context.getResponse();
@@ -250,23 +309,38 @@ class MemoryRealModelAbIT {
                     value(usage.getPromptTokens()), value(usage.getCompletionTokens()));
         }
 
+        /**
+         * 取出并清掉某次运行的合计。没有观测记录时失败，避免把缺失当成零用量。
+         */
         TokenTotals remove(String runId) {
             MutableTotals value = totals.remove(runId);
             if (value == null) throw new IllegalStateException("No model observations captured for run " + runId);
             return new TokenTotals(value.modelCalls, value.promptTokens, value.completionTokens);
         }
 
+        /**
+         * 从模型请求头读取运行关联号。没有该头时无法归因。
+         */
         private static String runId(Prompt prompt) {
             if (!(prompt.getOptions() instanceof OpenAiChatOptions options) || options.getHttpHeaders() == null) return null;
             return options.getHttpHeaders().get("X-AgentOps-Correlation-Id");
         }
 
+        /**
+         * 空的令牌计数按零处理。
+         */
         private static long value(Integer value) { return value == null ? 0 : value.longValue(); }
 
+        /**
+         * 一次运行上可并发累加的模型调用次数和令牌数。
+         */
         private static final class MutableTotals {
             private long modelCalls;
             private long promptTokens;
             private long completionTokens;
+            /**
+             * 把一次模型调用的提示词和补全令牌加进合计。
+             */
             synchronized void add(long prompt, long completion) {
                 modelCalls++;
                 promptTokens += prompt;
@@ -275,10 +349,19 @@ class MemoryRealModelAbIT {
         }
     }
 
+    /**
+     * 一次运行已经结束的模型调用次数和令牌数。
+     */
     record TokenTotals(long modelCalls, long promptTokens, long completionTokens) {}
 
+    /**
+     * 把令牌累加器注册成测试配置中的观测处理器。
+     */
     @TestConfiguration(proxyBeanMethods = false)
     static class TokenObservationConfiguration {
+        /**
+         * 创建供两个记忆实验共用的累加器。
+         */
         @Bean ModelTokenAccumulator modelTokenAccumulator() { return new ModelTokenAccumulator(); }
     }
 }
