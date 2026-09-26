@@ -83,7 +83,13 @@ class WatchlistReadabilityGapTest {
         assertThat(empty.rejected()).isZero();
         assertThat(service.list(owner)).extracting(WatchlistGroup::displayName).containsExactly("默认分组");
 
-        var merged = service.mergeLocal(owner, List.of("000001", "000001", "12", null, "abcdef"));
+        var codes = new ArrayList<String>();
+        codes.add("000001");
+        codes.add("000001");
+        codes.add("12");
+        codes.add(null);
+        codes.add("abcdef");
+        var merged = service.mergeLocal(owner, codes);
         assertThat(merged.added()).isEqualTo(1);
         assertThat(merged.existing()).isEqualTo(1);
         assertThat(merged.rejected()).isEqualTo(3);
