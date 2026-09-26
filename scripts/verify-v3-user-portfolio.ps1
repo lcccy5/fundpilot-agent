@@ -1,3 +1,6 @@
+# 跑默认 Maven 测试、指定的收益与隔离测试，以及 fund-web 的 lint、类型检查、构建和内存令牌门禁。
+# 任一步非 0 会抛错并尽量离开 fund-web 目录。MySQL 或浏览器验收起不来时记为 unavailable 或 skipped，不把整个脚本判失败。
+# MySQL 测试或 Playwright 明确失败时，写完 target/v3-acceptance/summary.json 后再抛错。
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path 'target/v3-acceptance' | Out-Null
 $mvn = if (Test-Path '.\mvnw.cmd') { '.\mvnw.cmd' } else { 'mvn' }

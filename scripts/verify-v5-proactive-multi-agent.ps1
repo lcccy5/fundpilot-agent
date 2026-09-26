@@ -1,3 +1,6 @@
+# 先跑 V4 验收，再跑多智能体测试，并把 A/B 结果写入 target/v5-acceptance/summary.json。
+# V4 失败、多智能体测试非 0，或 ab-eval.json 缺失时抛错退出，不写 V5 摘要。
+# 没有真实模型密钥时脚本不补跑在线 A/B，摘要里的质量分只来自测试夹具。
 $ErrorActionPreference = 'Stop'
 & "$PSScriptRoot\verify-v4-agent-runtime.ps1"
 New-Item -ItemType Directory -Force -Path 'target/v5-acceptance' | Out-Null

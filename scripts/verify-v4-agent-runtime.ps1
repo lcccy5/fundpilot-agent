@@ -1,3 +1,6 @@
+# 先跑 V3 验收，再跑 V4 运行时相关测试，结果写入 target/v4-acceptance/summary.json。
+# V3 脚本失败或指定 Maven 测试非 0 时直接抛错退出。MySQL 起不来或迁移测试失败记入摘要；只有 mysql 为 failed 时才在写完摘要后抛错。
+# 没设真实模型开关或缺少密钥时，模型长跑记为跳过，不当成套件失败。
 $ErrorActionPreference = 'Stop'
 & "$PSScriptRoot\verify-v3-user-portfolio.ps1"
 New-Item -ItemType Directory -Force -Path 'target/v4-acceptance' | Out-Null

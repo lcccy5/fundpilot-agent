@@ -1,3 +1,6 @@
+# 在本机 3307 端口准备一套仅供集成测试的 MySQL，并确保 jijing_agent_test 库存在。
+# 找不到 mysqld、初始化失败、进程退出或 40 秒内连不上时抛错。端口已在监听时不再启动第二份。
+# 首次授权 SQL 失败会再用口令 test 重试一次；最后的建库语句失败被重定向后仍可能让脚本以非 0 结束。
 $ErrorActionPreference = 'Stop'
 $basedir = 'C:/Program Files/MySQL/MySQL Server 8.0'
 $mysqld = Join-Path $basedir 'bin/mysqld.exe'

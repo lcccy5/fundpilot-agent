@@ -1,3 +1,6 @@
+# 按环境开关跑 V2 真环境验收，并把每套结果写到 target/v2-acceptance/summary.json。
+# 缺环境变量只记入 preflight，不中断。Docker 或本地 MySQL 起不来时继续。某套 Maven 非 0 记为 failed。
+# 没有套件被执行、仍有 not-run，或出现 failed 时 gate 为 incomplete，脚本本身仍以 0 退出。
 param([switch]$StartLocalDependencies)
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path 'target/v2-acceptance' | Out-Null

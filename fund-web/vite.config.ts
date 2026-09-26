@@ -34,6 +34,11 @@ const localBindingConfig = {
     : [],
 };
 
+/**
+ * 组装本地开发服务器：Tailwind、Vinext、站点插件，以及把 /api 和 /internal 转到后端。
+ * API_PROXY 为空时默认 127.0.0.1:8080；后端没启动时页面请求会得到连接失败，而不是前端校验错误。
+ * Cloudflare 插件动态导入失败时配置函数直接抛错，开发服务器起不来。
+ */
 export default defineConfig(async () => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
@@ -49,8 +54,16 @@ export default defineConfig(async () => {
     server: {
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
       proxy: {
-        '/api': { target: process.env.API_PROXY || 'http://127.0.0.1:8080', changeOrigin: true, headers: { Origin: 'http://localhost:3000' } },
-        '/internal': { target: process.env.API_PROXY || 'http://127.0.0.1:8080', changeOrigin: true, headers: { Origin: 'http://localhost:3000' } },
+        '/api': {
+          target: process.env.API_PROXY || 'http://127.0.0.1:8080',
+          changeOrigin: true,
+          headers: { Origin: 'http://localhost:3000' },
+        },
+        '/internal': {
+          target: process.env.API_PROXY || 'http://127.0.0.1:8080',
+          changeOrigin: true,
+          headers: { Origin: 'http://localhost:3000' },
+        },
       },
     },
     plugins: [

@@ -68,6 +68,10 @@ type Msg = {
   };
 };
 type Tab = "overview" | "watchlist" | "agent" | "insights" | "knowledge";
+/**
+ * 把一段文字里的加粗、行内代码和证据编号拆成可显示的片段。
+ * 标记不成对时按原文留下；证据编号对不上时不报错，只显示原来的字。
+ */
 const inline = (text: string) =>
   text
     .split(/(\*\*.*?\*\*|`.*?`|\bev-[a-z0-9-]{12,}\b)/gi)
@@ -87,18 +91,28 @@ const inline = (text: string) =>
         return <code key={i}>{unquoted}</code>;
       return part;
     });
-const evidencePattern = "ev-[a-z0-9-]{12,}",
-  isTableLine = (line: string) =>
-    new RegExp(`^\\|.*\\|(?:\\s+${evidencePattern})?\\s*$`, "i").test(
-      line.trim(),
-    ),
-  tableCells = (line: string) =>
-    line
-      .trim()
-      .replace(new RegExp(`\\s+${evidencePattern}\\s*$`, "i"), "")
-      .replace(/^\||\|$/g, "")
-      .split("|")
-      .map((cell) => cell.trim());
+const evidencePattern = "ev-[a-z0-9-]{12,}";
+/**
+ * 判断一行是不是带可选证据编号的 Markdown 表格行。
+ * 空行、普通段落和对不齐的竖线都会返回 false，调用方会把它当成普通段落，不会抛错。
+ */
+const isTableLine = (line: string) =>
+  new RegExp(`^\\|.*\\|(?:\\s+${evidencePattern})?\\s*$`, "i").test(line.trim());
+/**
+ * 去掉行尾证据编号和两侧竖线，拆出单元格文本。
+ * 没有竖线时得到只含整行的数组；空白单元格保留为空字符串，不视为校验失败。
+ */
+const tableCells = (line: string) =>
+  line
+    .trim()
+    .replace(new RegExp(`\\s+${evidencePattern}\\s*$`, "i"), "")
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((cell) => cell.trim());
+/**
+ * 把助手回答里的标题、列表、表格和引用渲染成块。
+ * 空行会被跳过；表格不足一行时不画出空表。无法识别的行按段落显示，解析过程不抛错。
+ */
 function RichText({ text }: { text: string }) {
   const lines = text.replace(/\r\n?/g, "\n").split("\n"),
     nodes: ReactNode[] = [];
@@ -207,7 +221,10 @@ function RichText({ text }: { text: string }) {
   return <div className="rich-text">{nodes}</div>;
 }
 
-/** Keeps each turn's live activity attached to that answer and collapsed by default. */
+/**
+ * 把这一轮的工具步骤和运行摘要折在回答下面，默认收起。
+ * 没有步骤也没有运行编号时不渲染。摘要接口还没回来时显示“正在同步”；摘要明确失败时显示“暂不可用”，不把整段回答清掉。
+ */
 function RunActivityPanel({ message }: { message: Msg }) {
   if (!message.activity && !message.runId) return null;
   const activity = message.activity,
@@ -222,41 +239,92 @@ function RunActivityPanel({ message }: { message: Msg }) {
           : `运行已完成 · ${activity?.steps.length ?? 0} 个步骤${summary ? ` · ${summary.evidenceCount} 条证据` : ""}`;
   return (
     <details className={`agent-activity ${activity?.status ?? "completed"}`}>
-      <summary><span>{compactLabel}</span></summary>
+      <summary>
+        <span>{compactLabel}</span>
+      </summary>
       {activity && activity.steps.length > 0 && (
         <ol className="agent-trace">
           {activity.steps.map((step, i) => (
             <li
               key={`${step.text}-${i}`}
-              className={step.failed ? "failed" : activity.status === "running" && i === activity.steps.length - 1 ? "running" : ""}
+              className={
+                step.failed
+                  ? "failed"
+                  : activity.status === "running" && i === activity.steps.length - 1
+                    ? "running"
+                    : ""
+              }
             >
-              <span>{i + 1}. {step.text}</span>
+              <span>
+                {i + 1}. {step.text}
+              </span>
             </li>
           ))}
         </ol>
       )}
       {message.summaryUnavailable && <div className="run-summary pending">运行摘要暂不可用</div>}
-      {message.runId && !message.summaryUnavailable && !summary && <div className="run-summary pending">正在同步运行摘要…</div>}
-      {summary && accounting && <div className="run-summary">
+      {message.runId && !message.summaryUnavailable && !summary && (
+        <div className="run-summary pending">正在同步运行摘要…</div>
+      )}
+      {summary && accounting && (
+        <div className="run-summary">
         <div className="run-facts">
-          <span><b>模型</b>{summary.model_name}</span>
-          <span><b>Prompt</b>{summary.prompt_version}</span>
-          <span><b>数据截止</b>{summary.dataCutoff ?? "以各证据为准"}</span>
-          <span><b>运行耗时</b>{summary.duration_ms == null ? "—" : `${summary.duration_ms} ms`}</span>
-          <span><b>模型调用</b>{accounting.available ? accounting.modelCallCount : "暂不可用"}</span>
-          <span><b>实际 Token</b>{accounting.available ? (accounting.actualTokens ?? summary.total_tokens ?? "—") : (summary.total_tokens ?? "—")}</span>
+          <span>
+            <b>模型</b>
+            {summary.model_name}
+          </span>
+          <span>
+            <b>Prompt</b>
+            {summary.prompt_version}
+          </span>
+          <span>
+            <b>数据截止</b>
+            {summary.dataCutoff ?? "以各证据为准"}
+          </span>
+          <span>
+            <b>运行耗时</b>
+            {summary.duration_ms == null ? "—" : `${summary.duration_ms} ms`}
+          </span>
+          <span>
+            <b>模型调用</b>
+            {accounting.available ? accounting.modelCallCount : "暂不可用"}
+          </span>
+          <span>
+            <b>实际 Token</b>
+            {accounting.available
+              ? (accounting.actualTokens ?? summary.total_tokens ?? "—")
+              : (summary.total_tokens ?? "—")}
+          </span>
         </div>
-        {summary.tools.length > 0 && <div className="run-tools">
-          {summary.tools.map((tool, i) => <span key={`${tool.toolName}-${i}`}>{tool.toolName} · {tool.status} · {tool.evidenceCount} 条证据</span>)}
-        </div>}
-        <small>AgentOps 账本：{accounting.available ? accounting.settled ? "已结算" : "处理中" : "暂不可用"}{summary.sources.length > 0 && ` · 来源 ${summary.sources.slice(0, 3).join("、")}`}</small>
-        {summary.adminConsoleUrl && <a href={summary.adminConsoleUrl} target="_blank" rel="noreferrer">管理员查看 AgentOps 详情 →</a>}
-      </div>}
+        {summary.tools.length > 0 && (
+          <div className="run-tools">
+            {summary.tools.map((tool, i) => (
+              <span key={`${tool.toolName}-${i}`}>
+                {tool.toolName} · {tool.status} · {tool.evidenceCount} 条证据
+              </span>
+            ))}
+          </div>
+        )}
+        <small>
+          AgentOps 账本：
+          {accounting.available ? (accounting.settled ? "已结算" : "处理中") : "暂不可用"}
+          {summary.sources.length > 0 && ` · 来源 ${summary.sources.slice(0, 3).join("、")}`}
+        </small>
+        {summary.adminConsoleUrl && (
+          <a href={summary.adminConsoleUrl} target="_blank" rel="noreferrer">
+            管理员查看 AgentOps 详情 →
+          </a>
+        )}
+        </div>
+      )}
     </details>
   );
 }
 
-/** Builds the selected NAV window from the user's local calendar date. */
+/**
+ * 按本机日历从今天往回推一个月、三个月、半年或一年，得到净值查询的起止日期。
+ * 不认识的区间不会抛错，起止都会落在今天，图表会因为点数不足显示空态。
+ */
 function currentNavWindow(range: NavRange = "1y") {
   const end = new Date();
   const start = new Date(end);
@@ -264,18 +332,29 @@ function currentNavWindow(range: NavRange = "1y") {
   if (range === "3m") start.setMonth(start.getMonth() - 3);
   if (range === "6m") start.setMonth(start.getMonth() - 6);
   if (range === "1y") start.setFullYear(start.getFullYear() - 1);
+  /**
+   * 把日期收成 YYYY-MM-DD。
+   * 无效日期会带上 NaN，随后的净值请求会因参数不合法返回 4xx 或空结果，这里不单独拦截。
+   */
   const format = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   return { startDate: format(start), endDate: format(end) };
 }
 
-/** Normalizes providers with ascending or descending NAV payloads for chart rendering. */
+/**
+ * 按净值日期从早到晚排序，避免数据源有时正序、有时倒序时把曲线画反。
+ * 空数组得到空数组；日期缺失时按空字符串比较，不会中断绘图。
+ */
 function chronologicalNavPoints(points: Nav[]) {
   return [...points].sort((left, right) =>
     left.navDate.localeCompare(right.navDate),
   );
 }
 
+/**
+ * 按基金代码和日期区间拉取单位净值。
+ * HTTP 非 2xx 时抛出正文里的 message 或 msg，都没有时提示历史净值不可用；正文不是 JSON 时由读取函数抛错。没有 items 时返回空数组，交给图表显示空态。
+ */
 async function requestNavPoints(fundCode: string, startDate: string, endDate: string) {
   const response = await fetch(`${API}/api/v1/funds/${fundCode}/nav?startDate=${startDate}&endDate=${endDate}`);
   const history = await readJsonResponse<{message?:string;msg?:string;data?:{items?:Nav[]};items?:Nav[]}>(response);
@@ -283,24 +362,70 @@ async function requestNavPoints(fundCode: string, startDate: string, endDate: st
   return chronologicalNavPoints((history.data ?? history).items ?? []);
 }
 
-/** Fills a missing current-period tail even when a broad historical query was cached earlier. */
+/**
+ * 先取整段净值，若最新日期还没到区间终点，再补请求缺口。
+ * 第一段为空时直接返回空数组。补段请求 4xx/5xx 或非 JSON 时整次失败，不会只返回已经拿到的前半段。
+ */
 async function requestFreshNavPoints(fundCode: string, startDate: string, endDate: string) {
   const points = await requestNavPoints(fundCode, startDate, endDate);
   const latestDate = points.at(-1)?.navDate;
   if (!latestDate || latestDate >= endDate) return points;
   const nextDate = new Date(`${latestDate}T00:00:00`);
   nextDate.setDate(nextDate.getDate() + 1);
-  const tailStart = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,"0")}-${String(nextDate.getDate()).padStart(2,"0")}`;
+  const tailStart = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(nextDate.getDate()).padStart(2, "0")}`;
   if (tailStart > endDate) return points;
   const tail = await requestNavPoints(fundCode, tailStart, endDate);
-  return chronologicalNavPoints([...new Map([...points,...tail].map(point=>[point.navDate,point])).values()]);
+  return chronologicalNavPoints([
+    ...new Map([...points, ...tail].map((point) => [point.navDate, point])).values(),
+  ]);
 }
 
-function NavRangeSelector({ range, loading, onRangeChange }: { range: NavRange; loading: boolean; onRangeChange: (range: NavRange) => void }) {
-  return <div className="chart-ranges" aria-label="净值时间范围">{NAV_RANGES.map(option=><button type="button" key={option.value} className={range===option.value?'active':''} disabled={loading} aria-pressed={range===option.value} onClick={()=>onRangeChange(option.value)}>{option.label}</button>)}</div>;
+/**
+ * 画出近 1 个月到近 1 年的区间按钮。
+ * 净值还在加载时按钮禁用，避免连点打出重叠请求；点击本身不处理接口错误。
+ */
+function NavRangeSelector({
+  range,
+  loading,
+  onRangeChange,
+}: {
+  range: NavRange;
+  loading: boolean;
+  onRangeChange: (range: NavRange) => void;
+}) {
+  return (
+    <div className="chart-ranges" aria-label="净值时间范围">
+      {NAV_RANGES.map((option) => (
+        <button
+          type="button"
+          key={option.value}
+          className={range === option.value ? "active" : ""}
+          disabled={loading}
+          aria-pressed={range === option.value}
+          onClick={() => onRangeChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
-function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range: NavRange; loading: boolean; onRangeChange: (range: NavRange) => void }) {
+/**
+ * 用抽样后的单位净值画走势。点数不足两天时不画线。
+ * 加载中和尚未查询共用同一块空图，只靠文案区分；接口 4xx/5xx 由外层顶栏承担，本组件没有单独的错误块。净值全相同或为 0 时涨跌幅可能得到 NaN 或无穷，仍会画平线。
+ */
+function Chart({
+  points,
+  range,
+  loading,
+  onRangeChange,
+}: {
+  points: Nav[];
+  range: NavRange;
+  loading: boolean;
+  onRangeChange: (range: NavRange) => void;
+}) {
   const p = useMemo(
     () =>
       points.filter(
@@ -312,7 +437,12 @@ function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range
   );
   if (p.length < 2)
     return (
-      <><div className="empty-chart">{loading?'正在加载区间净值…':'查询基金后，这里会展示真实单位净值走势。'}</div><NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/></>
+      <>
+        <div className="empty-chart">
+          {loading ? "正在加载区间净值…" : "查询基金后，这里会展示真实单位净值走势。"}
+        </div>
+        <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange} />
+      </>
     );
   const v = p.map((x) => +x.unitNav),
     min = Math.min(...v),
@@ -347,8 +477,15 @@ function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
       >
-        <defs><linearGradient id="nav-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2d78ed" stopOpacity=".22"/><stop offset="100%" stopColor="#2d78ed" stopOpacity=".025"/></linearGradient></defs>
-        {[18,42,66,90].map(y=><line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />)}
+        <defs>
+          <linearGradient id="nav-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#2d78ed" stopOpacity=".22" />
+            <stop offset="100%" stopColor="#2d78ed" stopOpacity=".025" />
+          </linearGradient>
+        </defs>
+        {[18, 42, 66, 90].map((y) => (
+          <line key={y} x1="0" x2="100" y1={y} y2={y} className="chart-grid-line" />
+        ))}
         <path d={`${d} L 100 96 L 0 96 Z`} fill="url(#nav-area)" />
         <path
           d={d}
@@ -365,10 +502,14 @@ function Chart({ points, range, loading, onRangeChange }: { points: Nav[]; range
         <span>{p[Math.floor(p.length / 2)].navDate}</span>
         <span>{p.at(-1)?.navDate}</span>
       </div>
-      <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange}/>
+      <NavRangeSelector range={range} loading={loading} onRangeChange={onRangeChange} />
     </>
   );
 }
+/**
+ * 首页：按代码查基金和净值，并把当前基金交给研究助手。
+ * 查询进行时按钮显示“查询中…”。资料或净值 4xx/5xx 只改顶栏，上一只基金的资料和曲线会留在页面上。没有独立的基金对比页，比较发生在助手工具或研究任务里。
+ */
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview"),
     [code, setCode] = useState(''),
@@ -392,7 +533,10 @@ export default function Home() {
     [watchSaving, setWatchSaving] = useState(false),
     [watchedCode, setWatchedCode] = useState<string>();
   const agentRef = useRef<HTMLElement>(null);
-  /** Loads profile and NAV together so the detail view never mixes two funds. */
+  /**
+   * 同时读取基金资料和近一年净值，避免详情和曲线来自两只基金。
+   * 资料非 2xx、净值 4xx/5xx、非 JSON 或网络失败时只改顶栏为接口文案或“查询失败”，不清空上一只基金。空代码也会发出请求。
+   */
   const loadFund = useCallback(async (id: string) => {
     const { startDate, endDate } = currentNavWindow("1y");
     setCode(id);
@@ -410,7 +554,7 @@ export default function Home() {
         }>(a);
       if (!a.ok)
         throw Error(profile.message ?? profile.msg ?? "基金资料暂不可用");
-      const loadedFund=profile.data ?? (profile as Fund);
+      const loadedFund = profile.data ?? (profile as Fund);
       setFund(loadedFund);
       setPoints(navPoints);
       setNavRange("1y");
@@ -422,16 +566,20 @@ export default function Home() {
       setLoading(false);
     }
   }, []);
+  /**
+   * 切换净值区间并重新请求。没有当前基金、区间没变或上一请求还在进行时直接返回。
+   * 新区间 4xx/5xx 或网络失败时退回原来的区间和曲线，顶栏显示接口文案或“区间切换失败”。
+   */
   const changeNavRange = async (nextRange: NavRange) => {
     if (!fund || nextRange === navRange || navLoading) return;
     const previousRange = navRange;
     const { startDate, endDate } = currentNavWindow(nextRange);
     setNavRange(nextRange);
     setNavLoading(true);
-    setNotice(`正在加载${NAV_RANGES.find(option=>option.value===nextRange)?.label}净值…`);
+    setNotice(`正在加载${NAV_RANGES.find((option) => option.value === nextRange)?.label}净值…`);
     try {
       setPoints(await requestFreshNavPoints(fund.fundCode, startDate, endDate));
-      setNotice(`已切换至${NAV_RANGES.find(option=>option.value===nextRange)?.label}走势`);
+      setNotice(`已切换至${NAV_RANGES.find((option) => option.value === nextRange)?.label}走势`);
     } catch (x) {
       setNavRange(previousRange);
       setNotice(x instanceof Error ? x.message : "区间切换失败");
@@ -439,11 +587,18 @@ export default function Home() {
       setNavLoading(false);
     }
   };
+  /**
+   * 把输入框里的代码左侧补零到 6 位后查询。
+   * 空输入会变成 000000 再请求，失败时由查询逻辑写顶栏，不会在这里做格式校验。
+   */
   const sync = async (e?: FormEvent) => {
     e?.preventDefault();
     await loadFund(code.padStart(6, "0"));
   };
-  /** A watchlist research link opens with its fund details already loaded. */
+  /**
+   * 地址上带了 code 时，打开页面就加载那只基金。
+   * 参数里没有数字时不请求；加载失败的提示与手动查询相同，地址参数本身不会被清空。
+   */
   useEffect(() => {
     const requestedCode = new URLSearchParams(window.location.search)
       .get("code")
@@ -455,7 +610,10 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadFund]);
-  /** Sends the current fund identity with the question to avoid ambiguous AI research. */
+  /**
+   * 把问题和当前基金名称一起交给流式研究助手。
+   * 问题为空白或上一轮还在进行时不发送。未登录、会话恢复失败、建会话 4xx/5xx、流不是 2xx、浏览器没有响应体、事件 JSON 损坏或运行失败事件，都会把这一轮标成失败并在气泡和顶栏写出原因。基金比较只作为工具步骤出现，没有单独的对比空态。
+   */
   const ask = async (e: FormEvent) => {
     e.preventDefault();
     if (!q.trim() || agentLoading) return;
@@ -469,8 +627,17 @@ export default function Home() {
     setQ("");
     setAgentLoading(true);
     setNotice("FundPilot 正在分析…");
+    /**
+     * 只改本轮助手消息，避免流式更新串到其它回合。
+     * 本轮已经被移除时静默不更新，不抛错。
+     */
     const updateTurn = (update: (message: Msg) => Msg) =>
-      setMessages((current) => current.map((message) => message.id === turnId ? update(message) : message));
+      setMessages((current) =>
+        current.map((message) => (message.id === turnId ? update(message) : message)),
+      );
+    /**
+     * 往本轮步骤列表追加一行。failed 为真时把整轮标成未完成，已有回答文字保留。
+     */
     const appendStep = (text: string, failed = false) =>
       updateTurn((message) => ({
         ...message,
@@ -510,6 +677,10 @@ export default function Home() {
         decoder = new TextDecoder();
       let buffer = "",
         streaming = false;
+      /**
+       * 把工具内部名称换成界面上的中文。
+       * 表里没有的名称原样显示，不当成错误。
+       */
       const label = (name: string) =>
         (
           ({
@@ -614,26 +785,56 @@ export default function Home() {
       setAgentLoading(false);
     }
   };
-  /** Saves directly to the signed-in watchlist, with device storage as a guest fallback. */
+  /**
+   * 把当前基金写入已登录用户的自选；云端失败时改存本机，登录后还能同步。
+   * 还没查到基金时什么都不做。列表、建默认分组或加入接口返回 4xx/5xx 时不会把错误留在顶栏，而是写入本机并提示稍后同步，因此校验失败和未登录看起来一样。
+   */
   const add = async () => {
     if (!fund) return;
-    if(watchedCode===fund.fundCode){setNotice(`${fund.name} 已经在你的自选中`);return;}
+    if (watchedCode === fund.fundCode) {
+      setNotice(`${fund.name} 已经在你的自选中`);
+      return;
+    }
     setWatchSaving(true);
-    try{
-      type WatchGroup={groupId:string;displayName:string;items?:{fundCode:string|{value:string}}[]};
-      let groups=await api<WatchGroup[]>('/api/v1/watchlists');
-      if(!groups.length){const created=await api<WatchGroup>('/api/v1/watchlists',{method:'POST',body:JSON.stringify({name:'默认分组'})});groups=[created];}
-      const existing=groups.find(group=>group.items?.some(item=>(typeof item.fundCode==='string'?item.fundCode:item.fundCode.value)===fund.fundCode));
-      if(existing){setWatchedCode(fund.fundCode);setNotice(`${fund.name} 已经在“${existing.displayName}”中`);return;}
-      await api(`/api/v1/watchlists/${groups[0].groupId}/items`,{method:'POST',body:JSON.stringify({fundCode:fund.fundCode})});
+    try {
+      type WatchGroup = {
+        groupId: string;
+        displayName: string;
+        items?: { fundCode: string | { value: string } }[];
+      };
+      let groups = await api<WatchGroup[]>("/api/v1/watchlists");
+      if (!groups.length) {
+        const created = await api<WatchGroup>("/api/v1/watchlists", {
+          method: "POST",
+          body: JSON.stringify({ name: "默认分组" }),
+        });
+        groups = [created];
+      }
+      const existing = groups.find((group) =>
+        group.items?.some(
+          (item) =>
+            (typeof item.fundCode === "string" ? item.fundCode : item.fundCode.value) === fund.fundCode,
+        ),
+      );
+      if (existing) {
+        setWatchedCode(fund.fundCode);
+        setNotice(`${fund.name} 已经在“${existing.displayName}”中`);
+        return;
+      }
+      await api(`/api/v1/watchlists/${groups[0].groupId}/items`, {
+        method: "POST",
+        body: JSON.stringify({ fundCode: fund.fundCode }),
+      });
       setWatchedCode(fund.fundCode);
       setNotice(`${fund.name} 已加入“${groups[0].displayName}”`);
-    }catch{
-      const codes=guestWatch();
-      saveGuestWatch([...codes,fund.fundCode]);
+    } catch {
+      const codes = guestWatch();
+      saveGuestWatch([...codes, fund.fundCode]);
       setWatchedCode(fund.fundCode);
       setNotice(`${fund.name} 已保存在此设备；登录后可同步`);
-    }finally{setWatchSaving(false);}
+    } finally {
+      setWatchSaving(false);
+    }
   };
   const overview = (
     <>
@@ -707,7 +908,9 @@ export default function Home() {
             </div>
           </dl>
           <button onClick={() => sync()} disabled={loading}>{loading?'更新中…':'更新数据'}</button>
-          <button className="text-button" onClick={()=>void add()} disabled={watchSaving}>{watchSaving?'正在加入…':watchedCode===fund?.fundCode?'✓ 已加入自选':'加入自选'}</button>
+          <button className="text-button" onClick={() => void add()} disabled={watchSaving}>
+            {watchSaving ? "正在加入…" : watchedCode === fund?.fundCode ? "✓ 已加入自选" : "加入自选"}
+          </button>
         </article>
       </section>
     </>
