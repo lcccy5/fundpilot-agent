@@ -31,8 +31,8 @@
 1. 受保护路由未认证时，安全入口直接写 `{"error":"UNAUTHORIZED"}`，不是 `ApiResponse`。评测令牌失败同样直接写 `{"error":"EVAL_TOKEN_INVALID"}`。只有请求已经进入控制器时，才使用统一信封。
 2. `BearerFilter` 吞掉一切令牌异常后继续过滤链。无效令牌和没带令牌最后都变成未认证，调用方看不到令牌失效原因。
 3. `AccessDeniedException` 映射为 401 `AUTH_REQUIRED`，不是 403。MCP 非管理员是控制器里的 403 `ADMIN_REQUIRED`。安全配置里角色不足则是框架默认 403，正文也不是统一信封。
-4. 损坏的 JSON（`HttpMessageNotReadableException`）被 `Exception` 兜底收成 500 `INTERNAL_ERROR`，消息固定为 `Internal server error`。方法不被支持等其它框架异常也一样。
-5. 报告尚未写完时抛出 `IllegalStateException`，对外是 500，不是 409 或 422。
+4. 损坏的 JSON（`HttpMessageNotReadableException`）被 `Exception` 兜底收成 500 `INTERNAL_ERROR`，消息固定为 `Internal server error`。方法不被支持也一样。`NoResourceFoundException` 会返回 404，但 `NoHandlerFoundException` 不在单独的映射里，独立 MockMvc 上没有控制器的路径会变成 500。完整 Boot 进程里未匹配路径通常走前一种。
+5. 报告尚未写完时抛出 `IllegalStateException`，对外是 500，不是 409 或 422。组合标识不是 UUID 时，`PortfolioId` 抛出 `IllegalArgumentException`，同样落到 500，而不是 400。
 6. `Last-Event-ID` 不是数字时从 0 重放，不返回 400。
 7. 暂停和恢复的控制器不检查登录用户。请求若到达控制器，无论运行是否存在都返回 410。生产过滤链会先以入口点 401 拦住匿名请求。
 8. 风险问卷控制器不读取当前用户。匿名拒绝只发生在安全过滤链。切片测试里没有过滤器时，匿名请求会执行用例。
@@ -48,6 +48,10 @@
 
 ## 测试
 
-命令：`mvn -pl fund-interface,fund-bootstrap test`
+先执行 `mvn -N install`，再执行 `mvn -pl fund-domain,fund-analytics,fund-application,fund-knowledge,fund-infrastructure,fund-agent-runtime,fund-scheduler,fund-test-support -DskipTests install`，最后执行：
 
-结果见提交说明之后的更新；若本节仍写“待运行”，表示该次提交发生在测试之前。
+`mvn -pl fund-interface,fund-bootstrap test`
+
+本地仓库里原来没有父 POM 和兄弟模块，所以第一条命令不能直接解析依赖。安装之后该命令通过。
+
+结果：`fund-interface` 105 个测试通过；`fund-bootstrap` 31 个测试里 15 个通过、16 个跳过。跳过的是需要 `RUN_MYSQL_INTEGRATION_TESTS`、`RUN_REAL_MODEL_SMOKE_TEST`、`RUN_REAL_EMBEDDING_TEST`、`RUN_MEMORY_WINDOW_EVAL`、`RUN_CURRENT_MEMORY_AB_EVAL` 或 `RUN_MEMORY_AB_EVAL` 的集成测试，本次环境没有这些变量。

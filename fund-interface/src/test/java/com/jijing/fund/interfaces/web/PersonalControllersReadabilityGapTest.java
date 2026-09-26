@@ -46,6 +46,7 @@ class PersonalControllersReadabilityGapTest {
     @MockBean PortfolioUseCase portfolios;
     @MockBean WatchlistUseCase watchlists;
     @MockBean RiskProfileUseCase risks;
+    private static final String PORTFOLIO = "00000000-0000-0000-0000-0000000000a1";
     private final AuthenticatedUser user = new AuthenticatedUser(
             new UserId("00000000-0000-0000-0000-000000000003"), Set.of(UserRole.USER), "session-p");
 
@@ -76,7 +77,7 @@ class PersonalControllersReadabilityGapTest {
      */
     @Test
     void portfolioAppendRejectsBadFundCode() throws Exception {
-        mvc.perform(post("/api/v1/portfolios/p1/transactions").principal(principal())
+        mvc.perform(post("/api/v1/portfolios/" + PORTFOLIO + "/transactions").principal(principal())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"fundCode":"12","type":"SUBSCRIPTION","tradeDate":"2026-01-02","confirmDate":"2026-01-03",
@@ -92,7 +93,7 @@ class PersonalControllersReadabilityGapTest {
     @Test
     void portfolioAppendConflict() throws Exception {
         when(portfolios.append(any(), any(), any())).thenThrow(new PortfolioConflictException("duplicate key"));
-        mvc.perform(post("/api/v1/portfolios/p1/transactions").principal(principal())
+        mvc.perform(post("/api/v1/portfolios/" + PORTFOLIO + "/transactions").principal(principal())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"fundCode":"000001","type":"SUBSCRIPTION","tradeDate":"2026-01-02","confirmDate":"2026-01-03",
@@ -103,11 +104,22 @@ class PersonalControllersReadabilityGapTest {
     }
 
     /**
+     * 组合标识不是 UUID 时在进入用例前失败，目前被兜底成 500。
+     */
+    @Test
+    void portfolioIdThatIsNotUuidIsInternalError() throws Exception {
+        mvc.perform(get("/api/v1/portfolios/not-a-uuid/valuation").principal(principal()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.message").value("Internal server error"));
+    }
+
+    /**
      * 估值日期无法解析时返回 400。
      */
     @Test
     void portfolioValuationRejectsBadDate() throws Exception {
-        mvc.perform(get("/api/v1/portfolios/p1/valuation").principal(principal()).param("asOfDate", "yesterday"))
+        mvc.perform(get("/api/v1/portfolios/" + PORTFOLIO + "/valuation").principal(principal()).param("asOfDate", "yesterday"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
     }
@@ -118,7 +130,7 @@ class PersonalControllersReadabilityGapTest {
     @Test
     void portfolioValuationMissing() throws Exception {
         when(portfolios.valuation(any(), any(), any())).thenThrow(new PortfolioNotFoundException("missing"));
-        mvc.perform(get("/api/v1/portfolios/p1/valuation").principal(principal()))
+        mvc.perform(get("/api/v1/portfolios/" + PORTFOLIO + "/valuation").principal(principal()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PERSONAL_RESOURCE_NOT_FOUND"));
     }
@@ -130,7 +142,7 @@ class PersonalControllersReadabilityGapTest {
     void portfolioValuationProviderDown() throws Exception {
         when(portfolios.valuation(any(), any(), any()))
                 .thenThrow(new ExternalDataSourceException("PROVIDER_UNAVAILABLE", "nav down"));
-        mvc.perform(get("/api/v1/portfolios/p1/valuation").principal(principal()))
+        mvc.perform(get("/api/v1/portfolios/" + PORTFOLIO + "/valuation").principal(principal()))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("PROVIDER_UNAVAILABLE"));
     }
@@ -142,7 +154,7 @@ class PersonalControllersReadabilityGapTest {
     void portfolioPreviewInvalidFile() throws Exception {
         when(portfolios.previewImport(any(), any(), any(), any())).thenThrow(new PortfolioException("unreadable sheet"));
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
-                        "/api/v1/portfolios/p1/imports/preview")
+                        "/api/v1/portfolios/" + PORTFOLIO + "/imports/preview")
                         .file(new org.springframework.mock.web.MockMultipartFile("file", "a.csv", "text/csv", new byte[]{1}))
                         .principal(principal()))
                 .andExpect(status().isBadRequest())

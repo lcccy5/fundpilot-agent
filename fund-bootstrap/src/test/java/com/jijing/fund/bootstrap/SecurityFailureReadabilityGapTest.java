@@ -25,10 +25,10 @@ import com.jijing.fund.interfaces.web.FundAgentController;
 import com.jijing.fund.interfaces.web.GlobalExceptionHandler;
 import com.jijing.fund.interfaces.web.RequestIdFilter;
 import com.jijing.fund.interfaces.web.UserController;
-import jakarta.validation.Validator;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -36,13 +36,18 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.FilterChainProxy;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.validation.Validator;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
@@ -66,6 +71,7 @@ class SecurityFailureReadabilityGapTest {
     static void boot() {
         context = new AnnotationConfigApplicationContext();
         context.register(SecurityConfiguration.class, Support.class);
+        context.getBeanFactory().setConversionService(new ApplicationConversionService());
         context.getEnvironment().getSystemProperties().put("FUND_JWT_SIGNING_KEY", SIGNING_KEY);
         context.getEnvironment().getSystemProperties().put("fund.security.bcrypt-strength", "4");
         context.refresh();
@@ -213,7 +219,8 @@ class SecurityFailureReadabilityGapTest {
     }
 
     /**
-     * 评测令牌正确时不再返回令牌错误；本切片没有评测控制器，因此继续得到 404。
+     * 评测令牌正确时不再返回令牌错误。本切片没有评测控制器，
+     * {@code NoHandlerFoundException} 被通用异常收成 500，而不是 401。
      */
     @Test
     void evaluationWithTokenPassesTheFilter() throws Exception {
@@ -221,7 +228,9 @@ class SecurityFailureReadabilityGapTest {
                         .header("X-Agent-Eval-Token", "local-agent-eval-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("EVAL_TOKEN_INVALID"))));
     }
 
     /**
@@ -272,6 +281,21 @@ class SecurityFailureReadabilityGapTest {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        /**
+         * 安全过滤链打开了 CORS，但本切片没有 MVC。提供一个最小来源配置让过滤链能够创建。
+         */
+        @Bean
+        CorsConfigurationSource corsConfigurationSource() {
+            CorsConfiguration config = new CorsConfiguration();
+            config.setAllowedOrigins(List.of("http://localhost:3000"));
+            config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+            config.setAllowedHeaders(List.of("*"));
+            config.setAllowCredentials(true);
+            UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+            source.registerCorsConfiguration("/**", config);
+            return source;
         }
     }
 

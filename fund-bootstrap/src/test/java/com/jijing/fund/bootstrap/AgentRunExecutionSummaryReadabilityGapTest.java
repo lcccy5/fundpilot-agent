@@ -1,10 +1,6 @@
 package com.jijing.fund.bootstrap;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -22,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.stubbing.Answer;
 import org.springframework.dao.DataRetrievalFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -39,10 +36,23 @@ class AgentRunExecutionSummaryReadabilityGapTest {
 
     /**
      * 用独立的 MockMvc 装配摘要控制器，避免拉起完整应用和数据源。
+     * 查询默认返回空列表，单个测试可以换成抛错或返回运行行。
      */
     @BeforeEach
     void setUp() {
-        jdbc = mock(JdbcTemplate.class);
+        bind(invocation -> List.of());
+    }
+
+    /**
+     * 按 SQL 文本决定 {@code queryForList} 的结果，避开 JdbcTemplate 上重载方法的桩歧义。
+     */
+    private void bind(Answer<Object> queryForList) {
+        jdbc = mock(JdbcTemplate.class, invocation -> {
+            if ("queryForList".equals(invocation.getMethod().getName())) {
+                return queryForList.answer(invocation);
+            }
+            return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
         AgentRunExecutionSummaryController controller = new AgentRunExecutionSummaryController(
                 jdbc, new ObjectMapper(), RestClient.builder(), "http://127.0.0.1:1", "test-token");
         mvc = MockMvcBuilders.standaloneSetup(controller)
@@ -77,7 +87,9 @@ class AgentRunExecutionSummaryReadabilityGapTest {
      */
     @Test
     void databaseFailureIsInternalError() throws Exception {
-        when(jdbc.queryForList(anyString(), any(), any())).thenThrow(new DataRetrievalFailureException("db down"));
+        bind(invocation -> {
+            throw new DataRetrievalFailureException("db down");
+        });
         mvc.perform(get("/api/v1/agent/runs/run-1/queryExecutionSummary").principal(principal()))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
@@ -92,9 +104,7 @@ class AgentRunExecutionSummaryReadabilityGapTest {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("run_id", "run-1");
         row.put("status", "SUCCEEDED");
-        when(jdbc.queryForList(contains("agent_run"), any(), any())).thenReturn(List.of(row));
-        when(jdbc.queryForList(contains("agent_tool_call"), any())).thenReturn(List.of());
-        when(jdbc.queryForList(contains("agent_fact_card"), any())).thenReturn(List.of());
+        bind(invocation -> List.of(row));
         mvc.perform(get("/api/v1/agent/runs/run-1/queryExecutionSummary").principal(principal()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
