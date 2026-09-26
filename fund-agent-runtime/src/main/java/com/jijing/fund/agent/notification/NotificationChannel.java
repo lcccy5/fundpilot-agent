@@ -1,14 +1,21 @@
 package com.jijing.fund.agent.notification;
 
-/** 定义 NotificationChannel 在 Agent 运行时中的能力契约。 */
+/**
+ * 把通知交给某个投递通道。通道拒绝或失败时返回未送达结果，不把敏感持仓正文发出去。
+ */
 public interface NotificationChannel {
-    
-    /** 执行该 Agent 运行时组件中的 deliver 操作。 */
+    /**
+     * 投递一条通知。消息为空、摘要含有禁止外发的持仓明细，或通道故障时，delivered 为 false，并用 status 说明原因。
+     */
     DeliveryResult deliver(NotificationMessage message);
-    
-    /** 在 Agent 运行时边界间传递 NotificationMessage 数据的不可变值对象。 */
-    record NotificationMessage(String ownerUserId,String summary,String appLink){}
-    
-    /** 在 Agent 运行时边界间传递 DeliveryResult 数据的不可变值对象。 */
-    record DeliveryResult(boolean delivered,String status){}
+
+    /**
+     * 待投递的通知。summary 是用户可见文案，appLink 只指向应用内页面，不携带持仓明细。
+     */
+    record NotificationMessage(String ownerUserId, String summary, String appLink) {}
+
+    /**
+     * 投递结果。delivered 为 false 时 status 说明是被拒绝、被去重、处于安静时段，还是通道失败。
+     */
+    record DeliveryResult(boolean delivered, String status) {}
 }
