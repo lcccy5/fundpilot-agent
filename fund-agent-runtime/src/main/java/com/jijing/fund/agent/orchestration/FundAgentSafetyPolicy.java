@@ -5,7 +5,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
-/** Deterministic guardrails applied before and after the non-deterministic model call. */
+/**
+ * 在模型调用前后执行的确定性安全闸门。
+ * 输入命中越权、泄密、危险操作或代下单规则，或回答含确定性收益承诺时，抛出策略异常并中止本次运行。
+ * 它不替代计划校验、路由权限检查、导出审批或对等代理契约。
+ */
 public final class FundAgentSafetyPolicy {
     private static final List<Pattern> INPUT_DENY_RULES = List.of(
             Pattern.compile("(?is).*(?:显示|泄露|输出|忽略).*(?:系统提示词|system prompt|数据库密码|api[ _-]?key).*$"),
@@ -17,8 +21,11 @@ public final class FundAgentSafetyPolicy {
             "保证收益", "保本保收益", "稳赚", "必涨", "保证上涨", "保证不会亏",
             "建议重仓", "建议满仓", "guaranteed return", "guaranteed profit");
 
-    
-    /** 在继续处理前校验 validateInput 对应的输入或状态。 */
+    /**
+     * 在路由顾问或主模型看到原文之前检查用户输入。
+     * 消息为 null 时直接返回。命中拒绝规则时抛出 {@link AgentPolicyViolationException}，
+     * 本次不进入计划、路由建议或对等代理。
+     */
     public void validateInput(String message) {
         if (message == null) {
             return;
@@ -30,8 +37,11 @@ public final class FundAgentSafetyPolicy {
         }
     }
 
-    
-    /** 在继续处理前校验 validateAnswer 对应的输入或状态。 */
+    /**
+     * 检查模型回答是否含确定性收益承诺或重仓指令。
+     * 回答为 null 时按空字符串处理。命中时抛出 {@link AgentPolicyViolationException}，
+     * 回答不得返回给用户，已创建的运行记为拒绝。
+     */
     public void validateAnswer(String answer) {
         String normalized = answer == null ? "" : answer.toLowerCase(Locale.ROOT);
         if (OUTPUT_DENY_PHRASES.stream().anyMatch(normalized::contains)) {
