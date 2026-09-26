@@ -15,11 +15,18 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+/**
+ * 用切片核对基金资料查询成功时回传统一信封和请求号。
+ */
 @WebMvcTest(controllers=FundQueryController.class)
 @Import({FundQueryController.class, RequestIdFilter.class, GlobalExceptionHandler.class})
 class FundQueryControllerTest {
     @Autowired MockMvc mvc;
     @MockBean FundQueryUseCase useCase;
+
+    /**
+     * 成功响应携带 SUCCESS、原请求号和基金代码。
+     */
     @Test void returnsUnifiedEnvelopeAndRequestId() throws Exception {
         when(useCase.getProfile("000001")).thenReturn(new FundProfileResult("000001", "华夏成长混合", "混合型",
                 "华夏基金", "王明", LocalDate.of(2001,12,18), "mock", Instant.now(), Instant.now(), "FRESH"));
@@ -29,6 +36,9 @@ class FundQueryControllerTest {
                 .andExpect(jsonPath("$.data.fundCode").value("000001"));
     }
 
+    /**
+     * 给接口切片提供一个不扫描全应用的启动配置。
+     */
     @SpringBootConfiguration
     @EnableAutoConfiguration
     static class TestApplication { }

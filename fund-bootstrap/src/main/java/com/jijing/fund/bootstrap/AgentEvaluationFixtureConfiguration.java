@@ -41,20 +41,31 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 
-/** Replaces only external/business data adapters while preserving Agent orchestration and tool execution. */
+/**
+ * 只替换外部和业务数据适配器，保留真实的 Agent 编排与工具执行。
+ * 这些 Bean 没有独立的 HTTP 失败码；夹具缺失时由评测入口或工具自己抛出。
+ */
 @Configuration(proxyBeanMethods = false)
 @Profile("agent-eval")
 public class AgentEvaluationFixtureConfiguration {
     private static final Instant NOW = Instant.parse("2026-08-31T12:00:00Z");
 
-    /** Supplies deterministic profile and NAV values labeled by the active fixture. */
+    /**
+     * 按当前夹具提供固定的基金资料和净值，避免评测打到外部数据源。
+     */
     @Bean @Primary
     FundQueryUseCase evaluationFundQueryUseCase() {
         return new FundQueryUseCase() {
+            /**
+             * 返回带夹具标签的资料。代码原样回传，不在这里判断基金是否存在。
+             */
             @Override public FundProfileResult getProfile(String code) {
                 return new FundProfileResult(code, "评测基金-" + AgentEvaluationFixtureContext.current(), "混合型", "评测基金公司",
                         "评测基金经理", LocalDate.of(2015, 1, 1), "agent-eval-fixture", NOW, NOW, "FRESH");
             }
+            /**
+             * 返回区间两端两个固定净值点，供净值工具产生可重复证据。
+             */
             @Override public FundNavHistoryResult getNavHistory(String code, LocalDate start, LocalDate end) {
                 return new FundNavHistoryResult(code, "agent-eval-fixture", List.of(
                         new NavPointResult(start, new BigDecimal("1.0000"), new BigDecimal("1.1000"), BigDecimal.ZERO),
@@ -63,20 +74,26 @@ public class AgentEvaluationFixtureConfiguration {
         };
     }
 
-    /** Supplies deterministic metrics while retaining the real metrics tool and evidence conversion. */
+    /**
+     * 提供固定指标，指标工具和证据转换仍走真实实现。
+     */
     @Bean @Primary
     FundMetricsQueryUseCase evaluationFundMetricsUseCase() {
         return (code, start, end, basis) -> metrics(code, start, end);
     }
 
-    /** Supplies same-window metrics for every requested fund to exercise the real comparison tool. */
+    /**
+     * 为每只请求的基金提供同一窗口的指标，用来走真实对比工具。
+     */
     @Bean @Primary
     FundComparisonUseCase evaluationFundComparisonUseCase() {
         return (codes, start, end, basis) -> new FundComparisonResult(start, end, NavBasis.ACCUMULATED_NAV,
                 codes.stream().map(code -> metrics(code, start, end)).toList(), Map.of());
     }
 
-    /** Supplies one auditable document chunk for document and mixed Tool/RAG cases. */
+    /**
+     * 提供一段可审计的季报片段，覆盖文档检索和工具与检索混合的题目。
+     */
     @Bean @Primary
     KnowledgeSearchUseCase evaluationKnowledgeSearchUseCase() {
         return query -> {
@@ -89,7 +106,9 @@ public class AgentEvaluationFixtureConfiguration {
         };
     }
 
-    /** Supplies an ETF proxy quote with complete typed lineage for the real realtime tool. */
+    /**
+     * 提供带完整谱系的 ETF 代理行情，供实时行情工具生成可追溯证据。
+     */
     @Bean @Primary
     RealtimeFundQuoteUseCase evaluationRealtimeQuoteUseCase() {
         return code -> {
@@ -103,6 +122,9 @@ public class AgentEvaluationFixtureConfiguration {
         };
     }
 
+    /**
+     * 构造一只基金在请求窗口上的固定指标，数值不随代码变化，只把代码和夹具名写进结果。
+     */
     private static FundMetrics metrics(String code, LocalDate start, LocalDate end) {
         MetricValue value = MetricValue.available(new BigDecimal("0.08000000"));
         return new FundMetrics(new FundCode(code), start, end, start, end, NavBasis.ACCUMULATED_NAV, 120,

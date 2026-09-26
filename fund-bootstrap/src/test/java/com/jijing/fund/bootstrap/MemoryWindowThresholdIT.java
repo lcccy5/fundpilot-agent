@@ -21,7 +21,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
-/** Observes which production chat-memory boundary binds first during one long real-model conversation. */
+/**
+ * 用真实模型的长对话观察生产记忆窗口先碰到消息条数还是令牌预算，并检查早期事实在裁剪后是否仍被复用。默认构建不执行。
+ */
 @SpringBootTest(properties = {
         "fund.agent.enabled=true",
         "fund.knowledge.enabled=true",
@@ -39,6 +41,9 @@ class MemoryWindowThresholdIT {
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper mapper;
 
+    /**
+     * 记录每一轮的库存消息和令牌，断言先触发的是消息条数上限。
+     */
     @Test
     void identifiesTheFirstBindingWindowThresholdAndChecksLateFactReuse() throws Exception {
         String conversationId = UUID.randomUUID().toString();
@@ -104,6 +109,9 @@ class MemoryWindowThresholdIT {
         assertThat(firstTrimmed.storedTokens()).isLessThan(MAX_TOKENS);
     }
 
+    /**
+     * 按固定顺序给出会反复引用同一只基金的问题。
+     */
     private static List<String> questions() {
         return List.of(
                 "查询基金000001的基本资料并引用工具证据。",
@@ -125,9 +133,18 @@ class MemoryWindowThresholdIT {
         );
     }
 
+    /**
+     * 某一时刻对话里保存的消息条数和令牌数。
+     */
     record WindowState(int messageCount, int tokenCount) {}
+    /**
+     * 一轮对话的库存、工具次数和是否成功。
+     */
     record TurnObservation(int turn, String runId, int storedMessages, int storedTokens, int toolCalls,
                            int profileToolCalls, int profileFactsUsed, boolean responseSucceeded, String errorType) {}
+    /**
+     * 写到目标目录的窗口阈值观察结果。
+     */
     record Report(String datasetVersion, int turns, int maxMessages, int maxTokens, int firstTrimTurn,
                   String bindingThreshold, int messagesAtFirstTrim, int tokensAtFirstTrim,
                   boolean earlyProfileReusedAfterEviction, List<TurnObservation> observations) {}
