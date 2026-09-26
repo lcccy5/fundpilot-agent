@@ -61,8 +61,7 @@ class GraphFailureReadabilityGapTest {
         assertThatThrownBy(() -> broken.invoke(new CatalystResearchGraph.Request("000001", null, 45)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("catalyst research graph failed")
-                .cause()
-                .hasMessage("source down");
+                .hasRootCauseMessage("source down");
 
         AtomicInteger attempts = new AtomicInteger();
         var missingCitation = new CatalystResearchGraph((request, attempt) -> {
@@ -77,8 +76,7 @@ class GraphFailureReadabilityGapTest {
         assertThatThrownBy(() -> missingCitation.invoke(new CatalystResearchGraph.Request("000001", null, 45)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("catalyst research graph failed")
-                .cause()
-                .hasMessage("verified evidence is required before review");
+                .hasRootCauseMessage("verified evidence is required before review");
         assertThat(attempts).hasValue(2);
     }
 
@@ -91,7 +89,8 @@ class GraphFailureReadabilityGapTest {
                 saver(ResumableDeclineAttributionGraph.NAME, ResumableDeclineAttributionGraph.VERSION, new InMemoryGraphCheckpointStore(), true),
                 "task-1"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("decline attribution graph failed");
+                .hasMessage("decline attribution graph failed")
+                .hasRootCauseMessage("verified evidence is required before review");
 
         var store = new InMemoryGraphCheckpointStore();
         store.append(new GraphCheckpoint("cp-done", "run-1", "task-1", ResumableCatalystResearchGraph.NAME,

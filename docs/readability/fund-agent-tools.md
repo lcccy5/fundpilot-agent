@@ -65,6 +65,10 @@ MCP 外部正文永远不可信。模式摘要缺失或不一致时计划暂停�
 10. 图失败统一包一层 `IllegalStateException`，没有使用框架中断。检查点状态里的 null 值会在 `Map.copyOf` 处抛出空指针。SHA-256 不可用的分支在标准 JDK 上不可达。
 11. `DurableGraphCheckpointSaver` 先写存储再序列化事件。序列化失败时，没有事务的存储实现会留下已经追加的快照。
 
+## 测试结果
+
+先安装同仓库的 `fund-domain`、`fund-analytics`、`fund-application`、`fund-knowledge` 后，执行 `mvn -pl fund-agent-runtime test`。结果是 135 个测试全部通过，没有失败、错误或跳过。图节点抛出的原始异常会被 LangGraph4j 包进 `GraphRunnerException`，测试断言的是最底层原因。
+
 ## 这次没有覆盖的失败路径
 
 - `SectorOutlookTool` 的主题搜索失败、样本不足和行情解析失败需要真实 HTTP，或先把客户端改成可注入。按“不改生产行为”跳过。
