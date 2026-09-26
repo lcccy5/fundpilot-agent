@@ -40,8 +40,10 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
- * 对基金或主题做“持仓穿透 -> 产业链映射 -> 可信公告检索 -> 暴露影响评估”。
- * 优先使用 ETF 日频 PCF 与最新行情；定期报告持仓严格标记披露日。
+ * 对基金或主题做持仓穿透、产业链映射、可信公告检索和暴露影响评估。
+ * 优先使用 ETF 日频申赎清单和最新行情；没有可验证的日频篮子时直接拒绝，不把定期报告持仓伪装成实时持仓。
+ * 参数不合法时返回可修正错误；外部数据源失败时返回数据未就绪。执行预算耗尽时原样抛出，不收成信封。
+ * 缺少执行轨迹时直接抛出 IllegalStateException。方法上的校验注解不会在 research 内执行。
  */
 public final class FundCatalystResearchTool {
     public static final String NAME = "research_fund_catalysts";
@@ -73,7 +75,9 @@ public final class FundCatalystResearchTool {
     private final RestClient quotes;
 
     
-    /** 执行该 Agent 运行时组件中的 FundCatalystResearchTool 操作。 */
+    /**
+     * 使用系统时钟和默认的公开数据客户端。某个客户端连不上时，研究步骤会按数据未就绪或不受支持返回，而不是在构造时失败。
+     */
     public FundCatalystResearchTool() {
         this(new ObjectMapper(), Clock.system(CHINA), client("https://fundsuggest.eastmoney.com"),
                 client("https://fundf10.eastmoney.com"), client("https://emweb.securities.eastmoney.com"),
@@ -81,6 +85,9 @@ public final class FundCatalystResearchTool {
                 client("https://reportdocs.static.szse.cn"), client("https://query.sse.com.cn"), client("https://qt.gtimg.cn"));
     }
 
+    /**
+     * 绑定可替换的时钟和数据客户端，供同包测试注入失败。任一客户端为 null 时，首次访问该数据源会抛出 NullPointerException。
+     */
     FundCatalystResearchTool(ObjectMapper mapper, Clock clock, RestClient fundSearch, RestClient holdings,
             RestClient companyProfile, RestClient announcements, RestClient fundPosition, RestClient szsePcf,
             RestClient ssePcf, RestClient quotes) {
@@ -97,7 +104,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 client 操作。 */
+    /**
+     * 创建带 3 秒连接和 6 秒读取超时的客户端。地址无效时要到第一次请求才失败。
+     */
     private static RestClient client(String baseUrl) {
         var http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
         var factory = new JdkClientHttpRequestFactory(http);
@@ -108,7 +117,12 @@ public final class FundCatalystResearchTool {
 
     @Tool(name = NAME, description = "研究一只中国公募基金、ETF或行业主题最近可能存在的真实利好和利空。工具会优先解析 ETF 或 ETF 联接基金的目标 ETF，读取当日/T-1 申购赎回篮子并结合最新行情估算成分权重；无法获取时才使用最近公开披露持仓。随后映射重仓股行业与主营业务，查询可核验的上市公司公告，并按权重评估影响。日频篮子不等于基金公司完整实时会计持仓；未核实传言不会作为事件。theme与fundCode至少提供一个。")
     
-    /** 执行该 Agent 运行时组件中的 research 操作。 */
+    /**
+     * 依次执行持仓、产业链、公告和影响评估。任一步失败都会先记下该步的失败码再抛出。
+     * 执行次数或重复调用超限时原样抛出 AgentExecutionLimitException。
+     * 基金或主题无法解析、没有日频篮子时返回 CATALYST_RESEARCH_UNSUPPORTED。
+     * 其他运行时失败返回 CATALYST_DATA_UNAVAILABLE，且不把底层异常原文回给模型。
+     */
     public FundToolEnvelope<CatalystResearch> research(@Valid Input input, ToolContext context) {
         AgentExecutionTrace trace = FundToolSupport.trace(context);
         try {
@@ -190,7 +204,10 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 构造后续 Agent 处理所需的 resolve 值。 */
+    /**
+     * 把基金代码或主题解析成一只有公开持仓的场内基金。代码不是 6 位数字，或代码和主题都为空时抛出 IllegalArgumentException。
+     * 只给主题时最多搜索 8 次；候选持仓都失败或搜索异常被吞掉后，抛出未找到对应场内基金。
+     */
     private ResolvedFund resolve(Input input) {
         String code = input.fundCode() == null ? "" : input.fundCode().trim();
         String theme = normalizeTheme(input.theme());
@@ -236,14 +253,18 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 normalizeTheme 操作。 */
+    /**
+     * 去掉主题里的口头语和空白。传入 null 时返回空字符串，由 resolve 决定是否还缺少研究对象。
+     */
     private String normalizeTheme(String value) {
         if (value == null) return "";
         return value.replaceAll("(?i)(板块|行业|主题|未来|后市|走势|一个月|几天|利好|利空|消息|新闻|分析|可能|有哪些|有什么|怎么看|\\s)", "").trim();
     }
 
     
-    /** 构造后续 Agent 处理所需的 resolveFundName 值。 */
+    /**
+     * 查询基金名称。搜索失败或没有匹配名称时返回 null，不阻断后续日频持仓链路。
+     */
     private String resolveFundName(String fundCode) {
         try {
             String body = fundSearch.get().uri(uri -> uri.path("/FundSearch/api/FundSearchAPI.ashx")
@@ -262,7 +283,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 fetchPortfolio 操作。 */
+    /**
+     * 解析关联 ETF 并读取日频申赎篮子。没有可验证篮子时抛出 IllegalArgumentException，不回退到定期报告持仓。
+     */
     private Portfolio fetchPortfolio(ResolvedFund resolved, int requestedTopN) {
         String underlyingEtfCode = resolveUnderlyingEtf(resolved.code());
         if (underlyingEtfCode != null) {
@@ -272,7 +295,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 构造后续 Agent 处理所需的 resolveUnderlyingEtf 值。 */
+    /**
+     * 场内 ETF 代码直接返回自身。联接基金查询目标 ETF；响应失败或代码形态不符时返回 null，由持仓步骤拒绝继续。
+     */
     private String resolveUnderlyingEtf(String fundCode) {
         if (fundCode.matches("(?:159\\d{3}|5\\d{5})")) return fundCode;
         try {
@@ -288,10 +313,16 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 fetchDailyPcfPortfolio 操作。 */
+    /**
+     * 读取深交所日频篮子；上交所代码改走上交所接口。最近 8 个自然日都失败时抛出最后一次运行时异常，
+     * 没有异常记录时抛出篮子不可用。行情覆盖不足或市值无效时抛出 IllegalArgumentException。
+     */
     private Portfolio fetchDailyPcfPortfolio(ResolvedFund resolved, String etfCode, int requestedTopN) {
-        if (etfCode.startsWith("5")) return fetchSsePcfPortfolio(resolved, etfCode, requestedTopN);
-        int topN = Math.max(1, Math.min(requestedTopN, 20)); RuntimeException last = null;
+        if (etfCode.startsWith("5")) {
+            return fetchSsePcfPortfolio(resolved, etfCode, requestedTopN);
+        }
+        int topN = Math.max(1, Math.min(requestedTopN, 20));
+        RuntimeException last = null;
         for (int daysBack = 0; daysBack <= 7; daysBack++) {
             LocalDate date = LocalDate.now(clock).minusDays(daysBack);
             try {
@@ -315,12 +346,17 @@ public final class FundCatalystResearchTool {
                 BigDecimal coverage = rows.stream().map(Holding::weightPercent).reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
                 String mode = resolved.code().equals(etfCode) ? "DAILY_PCF_ETF_BASKET" : "DAILY_PCF_UNDERLYING_ETF_PROXY";
                 return new Portfolio(fundName, resolved.code(), date, mode, coverage, rows, etfCode, etfName, mode);
-            } catch (RuntimeException ex) { last = ex; }
+            } catch (RuntimeException ex) {
+                last = ex;
+            }
         }
         throw last == null ? new IllegalArgumentException("ETF 日频 PCF 不可用") : last;
     }
 
-    /** 上交所公开 PCF：交易所当日申赎清单 + 最新行情估算，不是基金会计账簿持仓。 */
+    /**
+     * 读取上交所当日申赎清单，并用最新行情估算权重。这不是基金会计账簿持仓。
+     * 清单为空、行情覆盖不足、市值无效或响应不是 JSON 时抛出 IllegalArgumentException。
+     */
     private Portfolio fetchSsePcfPortfolio(ResolvedFund resolved, String etfCode, int requestedTopN) {
         String body = ssePcf.get().uri(uri -> uri.path("/commonQuery.do")
                         .queryParam("isPagination", false).queryParam("FUNDID2", etfCode)
@@ -358,36 +394,76 @@ public final class FundCatalystResearchTool {
         }
     }
 
+    /**
+     * 解析深交所篮子文本。正文为空或没有组合信息段时返回空列表，不抛出异常。
+     * 数量不是整数时抛出 NumberFormatException。现金替代代码 159900 会被跳过。
+     */
     static List<PcfComponent> parsePcf(String body) {
-        if (body == null || !body.contains("组合信息内容")) return List.of();
-        Matcher matcher = PCF_ROW.matcher(body.substring(body.indexOf("组合信息内容"))); List<PcfComponent> result = new ArrayList<>();
-        while (matcher.find()) { String code = matcher.group(1); long quantity = Long.parseLong(matcher.group(3).replace(",", "")); if (quantity > 0 && !"159900".equals(code)) result.add(new PcfComponent(code, matcher.group(2).trim(), quantity)); }
+        if (body == null || !body.contains("组合信息内容")) {
+            return List.of();
+        }
+        Matcher matcher = PCF_ROW.matcher(body.substring(body.indexOf("组合信息内容")));
+        List<PcfComponent> result = new ArrayList<>();
+        while (matcher.find()) {
+            String code = matcher.group(1);
+            long quantity = Long.parseLong(matcher.group(3).replace(",", ""));
+            if (quantity > 0 && !"159900".equals(code)) {
+                result.add(new PcfComponent(code, matcher.group(2).trim(), quantity));
+            }
+        }
         return List.copyOf(result);
     }
 
+    /**
+     * 查询成分股最新价。行情响应为空时返回空映射；单个价格不是正数或不是数字时跳过该代码，不使整批失败。
+     * 行情请求本身抛出的运行时异常会传给调用方。
+     */
     private Map<String, BigDecimal> latestPrices(List<PcfComponent> components) {
-        String symbols = components.stream().map(c -> (c.stockCode().startsWith("6") ? "sh" : "sz") + c.stockCode()).collect(java.util.stream.Collectors.joining(","));
-        String body = quotes.get().uri(uri -> uri.queryParam("q", symbols).build()).header(HttpHeaders.REFERER, "https://gu.qq.com/").retrieve().body(String.class);
-        Matcher matcher = TENCENT_QUOTE.matcher(body == null ? "" : body); Map<String, BigDecimal> result = new HashMap<>();
-        while (matcher.find()) { String[] fields = matcher.group(2).split("~", -1); if (fields.length > 3) try { BigDecimal price = new BigDecimal(fields[3]); if (price.signum() > 0) result.put(matcher.group(1), price); } catch (NumberFormatException ignored) {} }
+        String symbols = components.stream().map(c -> (c.stockCode().startsWith("6") ? "sh" : "sz") + c.stockCode())
+                .collect(java.util.stream.Collectors.joining(","));
+        String body = quotes.get().uri(uri -> uri.queryParam("q", symbols).build()).header(HttpHeaders.REFERER, "https://gu.qq.com/")
+                .retrieve().body(String.class);
+        Matcher matcher = TENCENT_QUOTE.matcher(body == null ? "" : body);
+        Map<String, BigDecimal> result = new HashMap<>();
+        while (matcher.find()) {
+            String[] fields = matcher.group(2).split("~", -1);
+            if (fields.length > 3) {
+                try {
+                    BigDecimal price = new BigDecimal(fields[3]);
+                    if (price.signum() > 0) {
+                        result.put(matcher.group(1), price);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
         return Map.copyOf(result);
     }
 
-    
-    /** 执行该 Agent 运行时组件中的 pcfName 操作。 */
-    private String pcfName(String body, String fallback) { Matcher matcher = PCF_NAME.matcher(body == null ? "" : body); return matcher.find() ? matcher.group(1).trim() : fallback; }
+    /**
+     * 从篮子抬头提取基金名称。正文为空或匹配不到时返回调用方给出的兜底名称，不抛出异常。
+     */
+    private String pcfName(String body, String fallback) {
+        Matcher matcher = PCF_NAME.matcher(body == null ? "" : body);
+        return matcher.find() ? matcher.group(1).trim() : fallback;
+    }
 
-    
-    /** 执行该 Agent 运行时组件中的 fetchDisclosedPortfolio 操作。 */
+    /**
+     * 读取最近一期公开披露持仓。当前持仓入口不会调用它。正文为空、缺少披露日或没有股票行时抛出 IllegalArgumentException。
+     */
     private Portfolio fetchDisclosedPortfolio(ResolvedFund resolved, int requestedTopN) {
         int topN = Math.max(1, Math.min(requestedTopN, 20));
         String body = holdings.get().uri(uri -> uri.path("/FundArchivesDatas.aspx")
                         .queryParam("type", "jjcc").queryParam("code", resolved.code()).queryParam("topline", topN)
                         .queryParam("year", "").queryParam("month", "").queryParam("rt", "0.1").build())
                 .header(HttpHeaders.REFERER, "https://fundf10.eastmoney.com/").retrieve().body(String.class);
-        if (body == null || body.isBlank()) throw new IllegalArgumentException("未取得基金公开持仓");
+        if (body == null || body.isBlank()) {
+            throw new IllegalArgumentException("未取得基金公开持仓");
+        }
         Matcher dateMatcher = DISCLOSURE_DATE.matcher(body);
-        if (!dateMatcher.find()) throw new IllegalArgumentException("公开持仓缺少披露日期");
+        if (!dateMatcher.find()) {
+            throw new IllegalArgumentException("公开持仓缺少披露日期");
+        }
         LocalDate disclosureDate = LocalDate.parse(dateMatcher.group(1));
         Matcher nameMatcher = FUND_NAME.matcher(body);
         String fundName = nameMatcher.find() ? html(nameMatcher.group(1)) : Optional.ofNullable(resolved.name()).orElse(resolved.code());
@@ -396,7 +472,9 @@ public final class FundCatalystResearchTool {
         while (row.find() && result.size() < topN) {
             result.add(new Holding(row.group(1), html(row.group(2)), decimal(row.group(3))));
         }
-        if (result.isEmpty()) throw new IllegalArgumentException("该基金最近一期未披露股票持仓");
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException("该基金最近一期未披露股票持仓");
+        }
         BigDecimal coverage = result.stream().map(Holding::weightPercent).reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
         String type = body.contains("季度股票投资明细") ? "QUARTERLY_REPORT_TOP_HOLDINGS"
@@ -405,7 +483,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 mapIndustries 操作。 */
+    /**
+     * 为前 8 只持仓映射行业标签和产业链位置。单只股票的资料请求失败时写入“公开主营业务信息暂不可用”，不使整步失败。
+     */
     private List<IndustryExposure> mapIndustries(List<Holding> holdings, String theme) {
         List<IndustryExposure> result = new ArrayList<>();
         for (Holding holding : holdings.stream().limit(8).toList()) {
@@ -428,7 +508,9 @@ public final class FundCatalystResearchTool {
                         break;
                     }
                 }
-                if (business.length() > 180) business = business.substring(0, 180) + "…";
+                if (business.length() > 180) {
+                    business = business.substring(0, 180) + "…";
+                }
                 String role = chainRole(theme, String.join(" ", tags) + " " + business);
                 result.add(new IndustryExposure(holding.stockCode(), holding.stockName(), holding.weightPercent(),
                         role, List.copyOf(tags), business));
@@ -441,7 +523,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 chainRole 操作。 */
+    /**
+     * 用主题和公开标签粗分上、中、下游。没有命中关键词时返回“相关产业环节”，不抛出异常。
+     */
     private String chainRole(String theme, String text) {
         String value = (Objects.toString(theme, "") + " " + text).toLowerCase(Locale.ROOT);
         if (containsAny(value, "减速器", "伺服", "传感器", "控制器", "电机", "丝杠", "轴承", "原材料", "化肥", "农药", "饲料", "种业")) return "上游核心材料/零部件";
@@ -451,12 +535,18 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 fetchEvents 操作。 */
+    /**
+     * 查询前 8 只持仓的公司公告，并丢掉回看窗口之外的记录。单只股票请求失败时跳过该股票，不使整步失败。
+     * 没有任何公告时返回空列表，由影响评估写成未发现可核验事件。
+     */
     private List<VerifiedEvent> fetchEvents(List<Holding> holdings, int days) {
         LocalDate cutoff = LocalDate.now(clock).minusDays(days);
         Map<String, BigDecimal> weights = new HashMap<>();
         Map<String, String> names = new HashMap<>();
-        holdings.forEach(h -> { weights.put(h.stockCode(), h.weightPercent()); names.put(h.stockCode(), h.stockName()); });
+        holdings.forEach(h -> {
+            weights.put(h.stockCode(), h.weightPercent());
+            names.put(h.stockCode(), h.stockName());
+        });
         Map<String, VerifiedEvent> dedup = new LinkedHashMap<>();
         for (Holding holding : holdings.stream().limit(8).toList()) {
             try {
@@ -486,6 +576,9 @@ public final class FundCatalystResearchTool {
                 .thenComparing(e -> e.holdingWeight().negate())).limit(20).toList();
     }
 
+    /**
+     * 按标题关键词把公告分成负面、正面或中性。同时命中负面词时优先记为负面。空标题返回中性，不抛出异常。
+     */
     static EventDirection direction(String title) {
         if (containsAny(title, NEGATIVE.toArray(String[]::new))) return EventDirection.NEGATIVE;
         if (containsAny(title, POSITIVE.toArray(String[]::new))) return EventDirection.POSITIVE;
@@ -493,7 +586,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 assess 操作。 */
+    /**
+     * 按出现对应方向公告的持仓权重评估暴露。没有事件时结论为未发现近期可核验公司事件，不把空结果当成利好或利空。
+     */
     private ImpactAssessment assess(List<Holding> holdings, List<VerifiedEvent> events) {
         Set<String> positiveStocks = new HashSet<>(), negativeStocks = new HashSet<>();
         for (VerifiedEvent event : events) {
@@ -513,14 +608,18 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 affectedWeight 操作。 */
+    /**
+     * 对命中代码的持仓权重去重求和。没有命中时返回 0.00，不抛出异常。
+     */
     private BigDecimal affectedWeight(List<Holding> holdings, Set<String> codes) {
         return holdings.stream().filter(h -> codes.contains(h.stockCode())).map(Holding::weightPercent)
                 .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
     }
 
     
-    /** 执行该 Agent 运行时组件中的 holdingEvidence 操作。 */
+    /**
+     * 为持仓快照生成证据。编号含随机部分，同一次输入重复调用不会得到相同编号。
+     */
     private EvidenceReference holdingEvidence(Portfolio portfolio) {
         return new EvidenceReference("ev-holding-" + UUID.randomUUID(), "FUND_HOLDING", portfolio.fundCode(),
                 portfolio.disclosureDate(), portfolio.disclosureDate(), portfolio.disclosureType(),
@@ -529,7 +628,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 industryEvidence 操作。 */
+    /**
+     * 为行业映射生成证据。industries 目前不写入证据正文；映射结果为空时仍生成这条检索范围证据。
+     */
     private EvidenceReference industryEvidence(Portfolio portfolio, List<IndustryExposure> industries) {
         return new EvidenceReference("ev-chain-" + UUID.randomUUID(), "INDUSTRY_CHAIN", portfolio.fundCode(),
                 portfolio.disclosureDate(), LocalDate.now(clock), "PUBLIC_INDUSTRY_TAGS_AND_MAIN_BUSINESS",
@@ -537,7 +638,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 eventEvidence 操作。 */
+    /**
+     * 为公告检索和每条公告生成证据。没有公告时只保留检索范围证据，不伪造公司事件引用。
+     */
     private List<EvidenceReference> eventEvidence(Portfolio portfolio, List<VerifiedEvent> events, int days) {
         List<EvidenceReference> result = new ArrayList<>();
         result.add(new EvidenceReference("ev-event-search-" + UUID.randomUUID(), "MARKET_EVENT_SEARCH",
@@ -554,7 +657,9 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 impactEvidence 操作。 */
+    /**
+     * 为权重化影响评估生成证据。impact 的数值不写入证据字段，只标明评估方法和时间窗。
+     */
     private EvidenceReference impactEvidence(Portfolio portfolio, ImpactAssessment impact, int days) {
         return new EvidenceReference("ev-impact-" + UUID.randomUUID(), "EVENT_IMPACT", portfolio.fundCode(),
                 LocalDate.now(clock).minusDays(days), LocalDate.now(clock), "HOLDING_WEIGHTED_EVENT_EXPOSURE",
@@ -562,28 +667,40 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 执行该 Agent 运行时组件中的 containsAny 操作。 */
+    /**
+     * 判断文本是否包含任一关键词。text 为 null 时抛出 NullPointerException。
+     */
     private static boolean containsAny(String text, String... values) {
         return java.util.Arrays.stream(values).anyMatch(text::contains);
     }
 
     
-    /** 执行该 Agent 运行时组件中的 decimal 操作。 */
+    /**
+     * 把持仓百分比收成两位小数。value 不是数字时抛出 NumberFormatException。
+     */
     private BigDecimal decimal(String value) {
         return new BigDecimal(value).setScale(2, RoundingMode.HALF_UP);
     }
 
     
-    /** 执行该 Agent 运行时组件中的 html 操作。 */
+    /**
+     * 还原常见 HTML 转义。未覆盖的实体保持原样，不因此失败。
+     */
     private String html(String value) {
         return value.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'")
                 .replace("&lt;", "<").replace("&gt;", ">");
     }
 
     
-    /** 在 Agent 运行时边界间传递 Input 数据的不可变值对象。 */
+    /**
+     * 催化研究入参。theme 与 fundCode 至少应提供一个，但该约束由 resolve 执行。
+     * topN 和 lookbackDays 的范围注解不会在紧凑构造器里执行；空值分别收成 10 和 45。
+     */
     public record Input(String theme, String fundCode, @Min(1) @Max(20) Integer topN,
             @Min(7) @Max(180) Integer lookbackDays) {
+        /**
+         * 为空的条数和回看天数填上默认值。越界的非空值会原样保留，直到外部校验器介入。
+         */
         public Input {
             topN = topN == null ? 10 : topN;
             lookbackDays = lookbackDays == null ? 45 : lookbackDays;
@@ -591,48 +708,69 @@ public final class FundCatalystResearchTool {
     }
 
     
-    /** 在 Agent 运行时边界间传递 Holding 数据的不可变值对象。 */
+    /**
+     * 一只重仓股及其在估算篮子中的权重百分比。权重不是基金公司会计账簿中的精确仓位。
+     */
     public record Holding(String stockCode, String stockName, BigDecimal weightPercent) {}
-    
-    /** 在 Agent 运行时边界间传递 IndustryExposure 数据的不可变值对象。 */
+
+    /**
+     * 一只持仓对应的行业标签、产业链位置和主营摘要。资料缺失时摘要会写明暂不可用，而不是留空冒充已核对。
+     */
     public record IndustryExposure(String stockCode, String stockName, BigDecimal weightPercent, String chainRole,
             List<String> industryTags, String mainBusinessSummary) {}
-    
-    /** 定义 Agent 运行时使用的 EventDirection 可选值。 */
+
+    /**
+     * 公告标题的规则化方向。中性表示标题没有命中正负词，不等于事件对净值没有影响。
+     */
     public enum EventDirection { POSITIVE, NEGATIVE, NEUTRAL }
-    
-    /** 在 Agent 运行时边界间传递 VerifiedEvent 数据的不可变值对象。 */
+
+    /**
+     * 一条可定位到公告页面的公司事件。sourceUrl 是引用位置；未核实传言不会生成该记录。
+     */
     public record VerifiedEvent(String eventId, String stockCode, String stockName, BigDecimal holdingWeight,
             String title, String category, EventDirection direction, LocalDate publishedDate, String sourceLevel,
             String sourceName, String sourceUrl) {}
-    
-    /** 在 Agent 运行时边界间传递 ImpactAssessment 数据的不可变值对象。 */
+
+    /**
+     * 正负事件覆盖的去重持仓权重。overallBias 是规则化结论，不是价格预测。
+     */
     public record ImpactAssessment(BigDecimal positiveAffectedWeight, BigDecimal negativeAffectedWeight,
             long positiveEventCount, long negativeEventCount, long neutralEventCount, String overallBias,
             String methodology) {}
-    
-    /** 在 Agent 运行时边界间传递 CatalystResearch 数据的不可变值对象。 */
+
+    /**
+     * 返回给模型的催化研究结果。limitations 必须保留，用来说明篮子估算和规则分类的边界。
+     */
     public record CatalystResearch(String fundName, String fundCode, String theme, LocalDate holdingsAsOf,
             String holdingsDisclosureType, BigDecimal disclosedHoldingsCoveragePercent, long holdingsStalenessDays,
             List<Holding> holdings, List<IndustryExposure> industryChainExposure, List<VerifiedEvent> verifiedEvents,
             ImpactAssessment impactAssessment, Instant searchedAt, String holdingsDataMode, String underlyingEtfCode,
             String underlyingEtfName, List<String> dataSources, List<String> limitations) {}
 
-    
-    /** 在 Agent 运行时边界间传递 ResolvedFund 数据的不可变值对象。 */
+    /**
+     * 解析后的基金代码、主题和名称。名称为 null 表示名称查询失败，持仓步骤仍可继续。
+     */
     private record ResolvedFund(String code, String theme, String name) {}
-    
-    /** 在 Agent 运行时边界间传递 FundCandidate 数据的不可变值对象。 */
+
+    /**
+     * 主题搜索得到的候选基金及排序分。分数只用于挑选，不会出现在最终结果里。
+     */
     private record FundCandidate(String code, String name, int score) {}
-    
-    /** 在 Agent 运行时边界间传递 Portfolio 数据的不可变值对象。 */
+
+    /**
+     * 一次持仓读取的内部结果。holdingsDataMode 用来区分日频篮子和披露持仓，避免把两者写成同一种证据。
+     */
     private record Portfolio(String fundName, String fundCode, LocalDate disclosureDate, String disclosureType,
             BigDecimal coveragePercent, List<Holding> holdings, String underlyingEtfCode, String underlyingEtfName,
             String holdingsDataMode) {}
-    
-    /** 在 Agent 运行时边界间传递 PcfComponent 数据的不可变值对象。 */
+
+    /**
+     * 申赎清单中的一只成分证券。数量不是正数的行不会被解析进来。
+     */
     record PcfComponent(String stockCode, String stockName, long quantity) {}
-    
-    /** 在 Agent 运行时边界间传递 ValuedComponent 数据的不可变值对象。 */
+
+    /**
+     * 带有最新行情市值的成分证券。没有正价格的成分不会进入该记录。
+     */
     private record ValuedComponent(PcfComponent component, BigDecimal marketValue) {}
 }
