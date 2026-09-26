@@ -1,4 +1,19 @@
 package com.jijing.fund.analytics.model;
 
-public enum MetricStatus { AVAILABLE, UNAVAILABLE }
+/**
+ * 标明一项指标有没有可用数值。
+ * 可用时读取数值；不可用时数值为空，必须另看原因码，不能把缺失当成零。两个常量都没有会抛出异常的方法，重复读取结果不变。
+ */
+public enum MetricStatus {
+    /**
+     * 数值已经算出，原因码应为空。
+     * 重复读取得到同一常量，不会因为多次访问而失效。
+     */
+    AVAILABLE,
 
+    /**
+     * 数值缺失。
+     * 调用方必须阅读原因码。把它换成零会掩盖样本不足、区间过短或数值溢出。
+     */
+    UNAVAILABLE
+}

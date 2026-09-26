@@ -1,4 +1,25 @@
 package com.jijing.fund.analytics.model;
 
-public enum NavBasis { UNIT_NAV, ACCUMULATED_NAV, ADJUSTED_NAV }
+/**
+ * 净值序列采用的口径。
+ * 单位净值、累计净值和复权净值不能混在同一次收益率里比较。枚举不检查序列内容；口径选错时计算仍会给出数字，但经济含义错误。
+ */
+public enum NavBasis {
+    /**
+     * 单位净值。
+     * 不含分红再投资。用它跨分红日计算收益会把分红看成下跌。
+     */
+    UNIT_NAV,
 
+    /**
+     * 累计净值。
+     * 含历史分红，仍可能没有做拆分复权。拆分日前后直接连算可能失真。
+     */
+    ACCUMULATED_NAV,
+
+    /**
+     * 复权净值。
+     * 用于跨分红和拆分的收益率。序列若实际未复权，枚举值本身发现不了。
+     */
+    ADJUSTED_NAV
+}
