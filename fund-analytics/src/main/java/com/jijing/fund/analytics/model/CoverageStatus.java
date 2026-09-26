@@ -1,4 +1,31 @@
 package com.jijing.fund.analytics.model;
 
-public enum CoverageStatus { COMPLETE, PARTIAL, INSUFFICIENT, UNKNOWN }
+/**
+ * 实际净值点数相对预期交易日的覆盖程度。
+ * 不足会让波动率和夏普改为不可用；未知表示预期交易日数量无效，不能当成完整样本。常量本身不抛出异常。
+ */
+public enum CoverageStatus {
+    /**
+     * 覆盖率达到 0.98 及以上。
+     * 风险指标可以继续按样本计算。阈值由覆盖率工厂决定，枚举不重新计算。
+     */
+    COMPLETE,
 
+    /**
+     * 覆盖率达到 0.90 且低于 0.98。
+     * 收益仍可计算，这个状态本身不会触发低覆盖拒绝。
+     */
+    PARTIAL,
+
+    /**
+     * 覆盖率低于 0.90。
+     * 波动率与夏普应标记为数据覆盖不足，而不是算出一个看起来精确的风险数。
+     */
+    INSUFFICIENT,
+
+    /**
+     * 预期交易日小于等于零，覆盖率无法计算。
+     * 不能把它当成完整样本，否则缺失的分母会被忽略。
+     */
+    UNKNOWN
+}
