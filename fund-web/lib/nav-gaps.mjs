@@ -1,9 +1,13 @@
-/** Calendar days between YYYY-MM-DD dates. Weekend gaps are at most 3. */
+/** Calendar days between YYYY-MM-DD dates. */
 export function calendarGap(earlier, later) {
   return Math.round((Date.parse(later) - Date.parse(earlier)) / 86400000);
 }
 
-/** Places points by date and splits the stroke where a gap is longer than a weekend. */
+/**
+ * Places observations by their real dates and joins every available NAV point.
+ * A calendar gap is not enough evidence that the series is missing data: funds
+ * do not publish NAV on weekends, exchange holidays, or suspension days.
+ */
 export function navChartSegments(points) {
   const ordered = [...points].filter(point => point?.navDate && point.unitNav != null)
     .sort((a, b) => a.navDate.localeCompare(b.navDate));
@@ -19,17 +23,9 @@ export function navChartSegments(points) {
     x: ((Date.parse(point.navDate) - start) / span) * 100,
     y: 90 - ((Number(point.unitNav) - min) / range) * 72,
   }));
-  const segments = [];
   let path = `M ${placed[0].x.toFixed(2)} ${placed[0].y.toFixed(2)}`;
   for (let index = 1; index < placed.length; index += 1) {
-    const gap = calendarGap(ordered[index - 1].navDate, ordered[index].navDate);
-    if (gap > 3) {
-      segments.push(path);
-      path = `M ${placed[index].x.toFixed(2)} ${placed[index].y.toFixed(2)}`;
-    } else {
-      path += ` L ${placed[index].x.toFixed(2)} ${placed[index].y.toFixed(2)}`;
-    }
+    path += ` L ${placed[index].x.toFixed(2)} ${placed[index].y.toFixed(2)}`;
   }
-  segments.push(path);
-  return { segments, min, max, points: placed };
+  return { segments: [path], min, max, points: placed };
 }

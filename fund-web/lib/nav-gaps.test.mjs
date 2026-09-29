@@ -7,9 +7,8 @@ const chart = navChartSegments([
   { navDate: '2026-01-20', unitNav: '1.2000' },
 ]);
 
-assert.equal(chart.segments.length, 2, 'a gap longer than a weekend must break the line');
-assert.match(chart.segments[0], /^M .+ L /);
-assert.match(chart.segments[1], /^M /);
+assert.equal(chart.segments.length, 1, 'market holidays must not break the NAV line');
+assert.match(chart.segments[0], /^M .+ L .+ L /);
 assert.doesNotMatch(chart.segments.join(' '), / C /, 'smoothing must not invent values across missing dates');
 assert.equal(chart.points[1].navDate, '2026-01-05');
 assert.ok(chart.points[1].x > chart.points[0].x);
