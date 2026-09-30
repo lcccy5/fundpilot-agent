@@ -29,6 +29,6 @@ export default function ComparePage(){
       <label>结束<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}/></label>
       <button>对比</button>
     </form>
-    {view&&<div className="holding-table"><div className="holding-head"><span>基金</span><span>区间</span><span>回撤</span></div>{view.rows.map(row=><div className="holding-row" key={row.code}><span>{row.code}</span><span>{row.intervalReturn}</span><span>{row.drawdown}</span></div>)}<p>共同区间 {view.windowText} · 口径 {view.basis}</p>{view.notes.map(note=><p key={note}>{note}</p>)}</div>}
+    {view&&<div className="holding-table"><div className="holding-head"><span>基金</span><span>区间</span><span>回撤</span></div>{view.rows.map((row:{code:string;intervalReturn:string;drawdown:string})=><div className="holding-row" key={row.code}><span>{row.code}</span><span>{row.intervalReturn}</span><span>{row.drawdown}</span></div>)}<p>共同区间 {view.windowText} · 口径 {view.basis}</p>{view.notes.map(note=><p key={note}>{note}</p>)}</div>}
   </section></AppShell>;
 }

@@ -49,6 +49,8 @@ export default defineConfig(async () => {
     server: {
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
       proxy: {
+        // 本地开发时把 Python 研究接口转发到 8001；普通 /api 仍走 Java。
+        '/api/research': { target: process.env.PYTHON_AGENT_PROXY || 'http://127.0.0.1:8001', changeOrigin: true },
         '/api': { target: process.env.API_PROXY || 'http://127.0.0.1:8080', changeOrigin: true, headers: { Origin: 'http://localhost:3000' } },
         '/internal': { target: process.env.API_PROXY || 'http://127.0.0.1:8080', changeOrigin: true, headers: { Origin: 'http://localhost:3000' } },
       },

@@ -3,7 +3,7 @@ import {ReactNode,useEffect,useState} from 'react';
 import Link from 'next/link';
 import {api,clearSession,currentAccessToken,restoreSession} from '../lib/session';
 
-const links=[['/', '⌂','总览'],['/watchlists','☆','我的自选'],['/portfolios','▣','我的组合'],['/runs','◌','研究任务'],['/reports','▤','月报'],['/notifications','◉','通知']] as const;
+const links=[['/', '⌂','总览'],['/watchlists','☆','我的自选'],['/portfolios','▣','我的组合'],['/runs','◌','研究任务'],['/arena','◇','多 Agent 研究'],['/reports','▤','月报'],['/notifications','◉','通知']] as const;
 
 function noticeTone(notice:string){
   if(/失败|错误|无法|没有权限|请先登录|未完成|暂不可用/.test(notice))return 'error';
