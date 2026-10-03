@@ -15,6 +15,38 @@ class FundApiError(Exception):
         self.status_code = status_code
 
 
+class IdentityClient:
+    """让 Java 业务层验证登录令牌，Python 只使用返回的用户 ID。"""
+
+    def __init__(self, base_url: str | None = None, transport: httpx.AsyncBaseTransport | None = None):
+        self.base_url = (base_url or os.getenv("FUND_API_BASE_URL", "http://127.0.0.1:8080")).rstrip("/")
+        self.transport = transport
+
+    async def user_id(self, authorization: str | None) -> str:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise FundApiError("请先登录，或重新登录后再试", 401)
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, transport=self.transport, timeout=10.0, trust_env=False
+            ) as client:
+                response = await client.get("/api/v1/users/me", headers={"Authorization": authorization})
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code in (401, 403):
+                raise FundApiError("请先登录，或重新登录后再试", 401) from error
+            raise FundApiError("无法验证登录状态，请检查 Java 后端") from error
+        except (httpx.RequestError, ValueError) as error:
+            raise FundApiError("无法验证登录状态，请检查 Java 后端") from error
+        data = payload.get("data") if isinstance(payload, dict) and payload.get("code") == "SUCCESS" else None
+        user_id = data.get("userId") if isinstance(data, dict) else None
+        if isinstance(user_id, dict):
+            user_id = user_id.get("value")
+        if not isinstance(user_id, str) or not user_id:
+            raise FundApiError("登录信息格式不正确")
+        return user_id
+
+
 class FundClient:
     METRICS = ("cumulativeReturn", "annualizedReturn", "annualizedVolatility", "maxDrawdown", "sharpeRatio")
 
@@ -32,7 +64,10 @@ class FundClient:
             body["navBasis"] = request.nav_basis
 
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, transport=self.transport, timeout=15.0) as client:
+            # 本地 Java 服务不能经过系统 HTTP 代理；与 main.py 的净值请求保持一致。
+            async with httpx.AsyncClient(
+                base_url=self.base_url, transport=self.transport, timeout=15.0, trust_env=False
+            ) as client:
                 # Java 的比较接口要求登录；只转发本次请求的 Bearer 凭证。
                 headers = {"Authorization": authorization} if authorization else {}
                 response = await client.post("/api/v1/fund-comparisons", json=body, headers=headers)
@@ -44,6 +79,13 @@ class FundClient:
                 raise FundApiError("请先登录，或重新登录后再试", 401) from error
             if error.response.status_code == 403:
                 raise FundApiError("当前账号没有权限比较基金", 403) from error
+            if error.response.status_code == 502:
+                try:
+                    upstream = error.response.json()
+                except ValueError:
+                    upstream = None
+                if isinstance(upstream, dict) and upstream.get("code") == "DATA_QUALITY_ERROR":
+                    raise FundApiError("基金数据源返回无效数据，请更换基金或日期范围", 502) from error
             status = 422 if error.response.status_code in (400, 404, 409, 422) else 502
             raise FundApiError(f"基金服务返回 HTTP {error.response.status_code}", status) from error
         except (httpx.RequestError, ValueError) as error:
@@ -59,7 +101,8 @@ class FundClient:
             end = date.fromisoformat(data["commonEndDate"])
             funds = []
             for item in data["funds"]:
-                code = item["fundCode"]["value"]
+                # Java 的 FundCode 在 HTTP JSON 中是六码字符串，不是 {"value": ...}。
+                code = item["fundCode"]
                 metrics = {}
                 for name in self.METRICS:
                     metric = item[name]

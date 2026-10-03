@@ -1,9 +1,9 @@
-/** Missing risk stays missing. A real zero is still shown as zero. */
+/** Java 返回的集中度是 0～1 的比例；只在展示时转换为百分数。缺失值保持缺失。 */
 export function riskFigure(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
-  return `${number.toFixed(2)}%`;
+  return `${(number * 100).toFixed(2)}%`;
 }
 
 export function presentRisk(risk, positionCount) {

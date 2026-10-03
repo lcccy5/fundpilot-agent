@@ -30,7 +30,7 @@ public class JdbcTransactionalOutbox {
     @Transactional public Optional<DomainEvent> claimPending(String workerId,Instant now){
         var rows=jdbc.query("""
                 SELECT event_id,event_type,aggregate_type,aggregate_id,owner_user_id,schema_version,CAST(payload_json AS CHAR),CAST(evidence_ids_json AS CHAR),deduplication_key,occurred_at
-                FROM outbox_event WHERE status IN ('PENDING','RETRY_WAIT') AND (lease_until IS NULL OR lease_until<?)
+                FROM outbox_event WHERE status IN ('PENDING','RETRY_WAIT','PUBLISHING') AND (lease_until IS NULL OR lease_until<?)
                 ORDER BY occurred_at LIMIT 1 FOR UPDATE SKIP LOCKED
                 """,(rs,n)->new DomainEvent(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getTimestamp(10).toInstant(),rs.getString(6),rs.getString(9),readMap(rs.getString(7)),readList(rs.getString(8)),null),Timestamp.from(now));
         if(rows.isEmpty())return Optional.empty();
@@ -50,6 +50,12 @@ public class JdbcTransactionalOutbox {
         jdbc.update("INSERT INTO event_dead_letter(dead_letter_id,event_id,reason_code,detail,created_at) VALUES(?,?,?,?,?)",
                 UUID.randomUUID().toString(),eventId,reason==null?"UNKNOWN":reason,null,Timestamp.from(now));
         jdbc.update("UPDATE outbox_event SET status='DEAD_LETTER',last_error_code=? WHERE event_id=?",reason,eventId);
+    }
+
+    /** Python 暂不可用时让事件十秒后重试，避免永久停在 PUBLISHING。 */
+    @Transactional public void retryWait(String eventId,Instant now){
+        jdbc.update("UPDATE outbox_event SET status='RETRY_WAIT',lease_owner=NULL,lease_until=?,last_error_code='PYTHON_AGENT_UNAVAILABLE' WHERE event_id=? AND status='PUBLISHING'",
+                Timestamp.from(now.plusSeconds(10)),eventId);
     }
 
     private String json(Object value){try{return mapper.writeValueAsString(value==null?List.of():value);}catch(Exception e){return "[]";}}

@@ -1,3 +1,5 @@
+const basisLabel = value => ({UNIT_NAV:'单位净值',ACCUMULATED_NAV:'累计净值',ADJUSTED_NAV:'复权净值'}[value] ?? value);
+const coverageLabel = value => ({PARTIAL:'部分缺失',COMPLETE:'完整',INSUFFICIENT:'不足',UNAVAILABLE:'暂不可用'}[value] ?? value);
 function metricText(metric, label) {
   if (!metric || metric.status !== 'AVAILABLE' || metric.value == null) {
     return `${label}缺失${metric?.unavailableReason ? `：${metric.unavailableReason}` : ''}`;
@@ -13,10 +15,10 @@ export function presentComparison(result) {
   const rows = funds.map((fund) => {
     const code = fund.fundCode?.value ?? String(fund.fundCode ?? '');
     const fundBasis = fund.navBasis?.name ?? fund.navBasis ?? '';
-    if (basis && fundBasis && fundBasis !== basis) notes.push(`${code} 的净值口径是 ${fundBasis}，与 ${basis} 不一致`);
+    if (basis && fundBasis && fundBasis !== basis) notes.push(`${code} 的净值口径是 ${basisLabel(fundBasis)}，与 ${basisLabel(basis)} 不一致`);
     if (fund.coverage && fund.coverage !== 'COMPLETE' && fund.coverage?.status !== 'COMPLETE') {
       const coverage = typeof fund.coverage === 'string' ? fund.coverage : fund.coverage.status;
-      if (coverage && coverage !== 'COMPLETE') notes.push(`${code} 的数据覆盖是 ${coverage}`);
+      if (coverage && coverage !== 'COMPLETE') notes.push(`${code} 的数据覆盖是 ${coverageLabel(coverage)}`);
     }
     return {
       code,
@@ -26,7 +28,7 @@ export function presentComparison(result) {
   });
   return {
     windowText: result?.commonStartDate && result?.commonEndDate ? `${result.commonStartDate} 至 ${result.commonEndDate}` : '共同区间未知',
-    basis: basis || '口径未返回',
+    basis: basisLabel(basis) || '口径未返回',
     rows,
     notes,
   };

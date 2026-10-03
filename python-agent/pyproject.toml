@@ -1,14 +1,20 @@
 [project]
 name = "fundpilot-python-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "FundPilot 的 Python 多 Agent 基金研究服务"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
+    "langchain-openai>=1.0,<2",
     "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=3.1.1,<4",
+    "mcp>=1.30,<2",
+    "jsonschema>=4,<5",
     "openai>=2.0,<3",
     "pydantic>=2.8,<3",
+    "python-dotenv>=1.2.3",
+    "tzdata>=2026.4",
     "uvicorn>=0.30,<1",
 ]
 

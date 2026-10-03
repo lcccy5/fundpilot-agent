@@ -25,11 +25,11 @@ page.on('console',msg=>{
 page.on('request',r=>seen.push(r.method()+' '+r.url()));
 try {
   await page.goto(base+'/register',{waitUntil:'load',timeout:30000});
-  await page.getByRole('heading',{name:'注册'}).waitFor({timeout:20000});
+  await page.getByRole('heading',{name:'开启你的研究空间'}).waitFor({timeout:20000});
   await page.locator('form.auth-form[data-hydrated="1"]').waitFor({timeout:45000});
   await page.getByPlaceholder('用户名').fill(user);
   await page.getByPlaceholder('显示名').fill(user);
-  await page.getByPlaceholder('密码（10-128）').fill(password);
+  await page.getByPlaceholder('密码（6-128）').fill(password);
   const registerWait=page.waitForResponse(r=>r.url().includes('/api/v1/auth/register')&&r.request().method()==='POST',{timeout:20000});
   await page.getByRole('button',{name:'创建账号'}).click();
   const registerRes=await registerWait;

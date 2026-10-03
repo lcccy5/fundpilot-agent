@@ -8,7 +8,7 @@ from typing import AsyncIterator, NotRequired, Protocol, TypedDict, TypeVar
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
 from client import FundApiError, FundClient
@@ -62,22 +62,46 @@ class OpenAIResearchModel:
         if not self.api_key:
             raise ModelUnavailable("请设置 DASHSCOPE_API_KEY 或 RESEARCH_API_KEY 后再运行研究 Agent")
 
+    @staticmethod
+    def _prompt_snapshot(snapshot: ComparisonSnapshot) -> tuple[str, dict[str, str]]:
+        """模型只看短编号；完整编号留在服务端，返回后再还原。"""
+        data = snapshot.model_dump(mode="json", by_alias=True)
+        aliases: dict[str, str] = {}
+        for fund in data["funds"]:
+            for metric in fund["metrics"].values():
+                if metric["status"] != "AVAILABLE":
+                    metric.pop("evidenceId", None)
+                    continue
+                short_id = f"E{len(aliases) + 1:02d}"
+                aliases[short_id] = metric["evidenceId"]
+                metric["evidenceId"] = short_id
+        return json.dumps(data, ensure_ascii=False), aliases
+
+    @staticmethod
+    def _expand_evidence(opinion: AnalystOpinion | FinalDecision, aliases: dict[str, str]) -> None:
+        claims = opinion.claims if isinstance(opinion, AnalystOpinion) else opinion.rationale
+        for claim in claims:
+            if any(short_id not in aliases for short_id in claim.evidence_ids):
+                raise ModelError("模型引用了本次快照之外的证据编号")
+            claim.evidence_ids = [aliases[short_id] for short_id in claim.evidence_ids]
+
     async def _ask(self, role: str, system: str, user: str, schema: type[Output]) -> Output:
         self.ensure_available()
         try:
-            # 每次请求单独创建客户端，避免跨事件循环复用连接。
-            async with AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, timeout=45.0) as client:
-                response = await client.chat.completions.create(
-                    model=self.models[role],
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    response_format={"type": "json_object"},
-                    extra_body={"enable_thinking": False},
-                )
-            content = response.choices[0].message.content
-            if not content:
+            # LangChain 统一模型调用接口；LangGraph 负责角色执行顺序与状态。
+            model = ChatOpenAI(
+                model=self.models[role],
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=45.0,
+                extra_body={"enable_thinking": False},
+            )
+            response = await model.ainvoke(
+                [("system", system), ("human", user)],
+                response_format={"type": "json_object"},
+            )
+            content = response.content
+            if not isinstance(content, str) or not content:
                 raise ModelError("模型没有返回研究结果")
             # 某些兼容模型会给 JSON 外面包一层 Markdown 代码块。
             cleaned = content.strip()
@@ -101,9 +125,13 @@ class OpenAIResearchModel:
             "只使用用户提供的数据，不推测未来收益，也不编造基金名称或市场新闻。"
             "只返回 JSON：summary 字符串，claims 数组（每项含 statement 和 evidenceIds），"
             "limitations 字符串数组。每条可检验的论断必须引用给出的 evidenceId。"
+            "evidenceIds 只能填写快照中 E01、E02 这类完整短编号，不要拆开编号。"
             "最多四条 claims，中文简洁表达。"
         )
-        return await self._ask(role, system, snapshot.model_dump_json(by_alias=True), AnalystOpinion)
+        prompt_snapshot, aliases = self._prompt_snapshot(snapshot)
+        opinion = await self._ask(role, system, prompt_snapshot, AnalystOpinion)
+        self._expand_evidence(opinion, aliases)
+        return opinion
 
     async def judge(
         self, snapshot: ComparisonSnapshot, bull: AnalystOpinion, bear: AnalystOpinion
@@ -114,14 +142,23 @@ class OpenAIResearchModel:
             "证据不足时 preferredFundCode 必须为 null。"
             "只返回 JSON：preferredFundCode（六码基金代码或 null）、conclusion 字符串、"
             "rationale 数组（每项含 statement 和 evidenceIds）、disagreements 字符串数组、"
-            "limitations 字符串数组。中文简洁表达。"
+            "limitations 字符串数组。evidenceIds 只能填写快照中的 E 编号。中文简洁表达。"
         )
+        prompt_snapshot, aliases = self._prompt_snapshot(snapshot)
+        full_to_short = {full: short for short, full in aliases.items()}
+        bull_data = bull.model_dump(mode="json", by_alias=True)
+        bear_data = bear.model_dump(mode="json", by_alias=True)
+        for opinion in (bull_data, bear_data):
+            for claim in opinion["claims"]:
+                claim["evidenceIds"] = [full_to_short[value] for value in claim["evidenceIds"]]
         user = (
-            f"原始数据：{snapshot.model_dump_json(by_alias=True)}\n"
-            f"看多观点：{bull.model_dump_json(by_alias=True)}\n"
-            f"看空观点：{bear.model_dump_json(by_alias=True)}"
+            f"原始数据：{prompt_snapshot}\n"
+            f"看多观点：{json.dumps(bull_data, ensure_ascii=False)}\n"
+            f"看空观点：{json.dumps(bear_data, ensure_ascii=False)}"
         )
-        return await self._ask("judge", system, user, FinalDecision)
+        decision = await self._ask("judge", system, user, FinalDecision)
+        self._expand_evidence(decision, aliases)
+        return decision
 
 
 class ResearchState(TypedDict):

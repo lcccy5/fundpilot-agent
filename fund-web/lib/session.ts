@@ -1,4 +1,6 @@
 const API=process.env.NEXT_PUBLIC_API_BASE??'';
+// 生产环境可单独配置 Python 地址；同域部署时由网关转发 /api/agent。
+export const AGENT_API_BASE=process.env.NEXT_PUBLIC_AGENT_API_BASE??API;
 const GUEST_WATCH_KEY='fundpilot.guestWatch';
 const SESSION_KEY='fundpilot.accessSession';
 type StoredSession={token:string;expiresAt:string};
@@ -52,13 +54,14 @@ export async function api<T=any>(path:string,init:RequestInit={}):Promise<T>{
   const headers=new Headers(init.headers);
   if(accessToken)headers.set('Authorization',`Bearer ${accessToken}`);
   if(init.body&&!(init.body instanceof FormData)&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
-  const send=()=>fetch(`${API}${path}`,{...init,headers,credentials:'include'});
+  const base=path.startsWith('/api/agent/')||path.startsWith('/api/research/')?AGENT_API_BASE:API;
+  const send=()=>fetch(`${base}${path}`,{...init,headers,credentials:'include'});
   let r=await send();
   if((r.status===401||r.status===403)&&!path.startsWith('/api/v1/auth/')){
     refreshInFlight??=refreshOnce().finally(()=>{refreshInFlight=undefined;});
     if(await refreshInFlight){
       if(accessToken)headers.set('Authorization',`Bearer ${accessToken}`);
-      r=await fetch(`${API}${path}`,{...init,headers,credentials:'include'});
+      r=await fetch(`${base}${path}`,{...init,headers,credentials:'include'});
     }
   }
   const json=await readJsonResponse<{data?:unknown;message?:string;msg?:string;error?:string}>(r);

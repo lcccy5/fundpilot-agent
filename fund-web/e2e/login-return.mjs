@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 
 const page = fs.readFileSync('app/login/page.tsx', 'utf8');
-const body = page.match(/function safeNext\(\)\{([\s\S]*?)\n\}/)?.[1];
-if (!body || !page.includes('location.href=safeNext()')) {
+const body = page.match(/function safeNext\(\)\s*\{([\s\S]*?)\n\}/)?.[1];
+if (!body || !page.replace(/\s+/g,'').includes('location.href=safeNext()')) {
   console.error('login must return through safeNext');
   process.exit(1);
 }
@@ -18,3 +18,8 @@ if (destination('?next=//evil.example') !== '/' || destination('?next=https://ev
 }
 
 console.log('login-return: original page is kept and off-site next is rejected');
+
+if (destination('?next=/%5Cevil.example') !== '/' || destination('?next=/%09/evil.example') !== '/') {
+  console.error('login must reject backslash and control-character return paths');
+  process.exit(1);
+}

@@ -1,19 +1,27 @@
 """基金研究 Agent 的 HTTP 入口。"""
 
 import json
+import os
+from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from client import FundApiError, FundClient
+from client import FundApiError, FundClient, IdentityClient
 from main import get_latest_nav
 from models import CompareRequest, ResearchResult
 from research import ModelError, ModelUnavailable, OpenAIResearchModel, ResearchWorkflow
 from store import RunStore
+from agent.api import routes
+from agent.repository import AgentRepository
+from agent.runtime import AgentRuntime
+from agent.events import EventService
+from agent.config import load_local_environment
 
 
 class FundNav(BaseModel):
@@ -22,10 +30,38 @@ class FundNav(BaseModel):
     unitNav: Decimal
 
 
-def create_app(workflow: ResearchWorkflow | None = None, store: RunStore | None = None) -> FastAPI:
-    app = FastAPI(title="FundPilot Research Agent", version="0.1.0")
+def create_app(
+    workflow: ResearchWorkflow | None = None,
+    store: RunStore | None = None,
+    identity: IdentityClient | None = None,
+) -> FastAPI:
+    load_local_environment()
+    run_store = store or RunStore()
+    login = identity or IdentityClient()
+    repository = AgentRepository(run_store.db_path)
+    runtime = AgentRuntime(repository, login)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        # 当前使用单进程运行：重启后显式标记中断任务，不能把它们永久显示为运行中。
+        repository.recover()
+        yield
+        await runtime.shutdown()
+
+    app = FastAPI(title="FundPilot Research Agent", version="0.2.0", lifespan=lifespan)
+    origins = [value.strip() for value in os.getenv("AGENT_CORS_ORIGINS", "").split(",") if value.strip()]
+    if origins:
+        app.add_middleware(CORSMiddleware, allow_origins=origins,
+                           allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
+                           allow_credentials=True)
     app.state.workflow = workflow or ResearchWorkflow(FundClient(), OpenAIResearchModel())
-    app.state.store = store or RunStore()
+    app.state.store = run_store
+    app.state.identity = login
+    app.state.agent_runtime = runtime
+    app.state.agent_repository = repository
+    app.include_router(routes(repository, runtime, login))
+    app.state.event_service = EventService(repository)
+    app.include_router(app.state.event_service.router())
 
     @app.get("/api/nav/{fund_code}", response_model=FundNav)
     def latest_nav(fund_code: str) -> FundNav:
@@ -37,8 +73,9 @@ def create_app(workflow: ResearchWorkflow | None = None, store: RunStore | None 
         request: CompareRequest, authorization: str | None = Header(default=None)
     ) -> ResearchResult:
         try:
+            owner_id = await app.state.identity.user_id(authorization)
             result = await app.state.workflow.run(request, authorization)
-            app.state.store.save(result)
+            app.state.store.save(result, owner_id)
             return result
         except ModelUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
@@ -53,7 +90,10 @@ def create_app(workflow: ResearchWorkflow | None = None, store: RunStore | None 
     ) -> StreamingResponse:
         # 在响应头发出前检查配置，前端能收到正常的 HTTP 503。
         try:
+            owner_id = await app.state.identity.user_id(authorization)
             app.state.workflow.model.ensure_available()
+        except FundApiError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
         except ModelUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -76,7 +116,7 @@ def create_app(workflow: ResearchWorkflow | None = None, store: RunStore | None 
                         "trace": changes[f"{role}_trace"].model_dump(mode="json", by_alias=True),
                     })
                 result = app.state.workflow.result_from_state(state, run_id)
-                app.state.store.save(result)
+                app.state.store.save(result, owner_id)
                 yield event("completed", {
                     "result": result.model_dump(mode="json", by_alias=True),
                 })
@@ -92,8 +132,14 @@ def create_app(workflow: ResearchWorkflow | None = None, store: RunStore | None 
         })
 
     @app.get("/api/research/runs/{run_id}", response_model=ResearchResult)
-    def get_research_run(run_id: str) -> ResearchResult:
-        result = app.state.store.load(run_id)
+    async def get_research_run(
+        run_id: str, authorization: str | None = Header(default=None)
+    ) -> ResearchResult:
+        try:
+            owner_id = await app.state.identity.user_id(authorization)
+        except FundApiError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+        result = app.state.store.load(run_id, owner_id)
         if result is None:
             raise HTTPException(status_code=404, detail="研究运行不存在")
         return result

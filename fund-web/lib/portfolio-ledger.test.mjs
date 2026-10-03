@@ -8,7 +8,7 @@ const missing = presentRisk({ coverage: 'PARTIAL', maxFundWeight: null, warnings
 assert.equal(missing.ready, false);
 assert.match(missing.reason, /NAV_UNAVAILABLE:000001/);
 assert.equal(presentRisk(null, 0).ready, false);
-const ready = presentRisk({ coverage: 'COMPLETE', maxFundWeight: 40, top3Weight: 80, concentrationStatus: 'MODERATE', asOfDate: '2026-08-01' }, 2);
+const ready = presentRisk({ coverage: 'COMPLETE', maxFundWeight: 0.4, top3Weight: 0.8, concentrationStatus: 'MODERATE', asOfDate: '2026-08-01' }, 2);
 assert.equal(ready.ready, true);
 assert.equal(ready.maxFund, '40.00%');
 
